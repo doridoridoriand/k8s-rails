@@ -9,6 +9,11 @@ RSpec.describe KubeRails do
 
   it "does not require kruby at load time (lazy, §3 data-flow principle)" do
     # Only lib/kuberails/client.rb may require "kubernetes" (§7).
-    expect($LOADED_FEATURES.grep(%r{/kubernetes\.rb})).to be_empty
+    # Verified in a FRESH subprocess: a process-global $LOADED_FEATURES check
+    # would falsely fail once client specs (M1) load kruby in-process.
+    code = "require \"kuberails\"; " \
+           "puts($LOADED_FEATURES.grep(%r{kubernetes\.rb$}).empty?)"
+    out = `echo '#{code}' | #{RbConfig.ruby} -Ilib -`.strip
+    expect(out).to eq("true")
   end
 end
