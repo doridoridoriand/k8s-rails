@@ -1,0 +1,10 @@
+# Minimal rubocop configuration for M0.
+# Full policy (line length, layout, project conventions) lands in M3.
+AllCops:
+  TargetRubyVersion: 3.2
+  NewCops: disable
+  SuggestExtensions: false
+
+# Rails convention: double-quoted strings (matches design doc examples / immerse).
+Style/StringLiterals:
+  EnforcedStyle: double_quotes
