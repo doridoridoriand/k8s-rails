@@ -147,6 +147,18 @@ RSpec.describe KubeRails::Client do
 
       expect { KubeRails.connected? }.to raise_error(KubeRails::Unavailable)
     end
+
+    it "applies the K1 bridge to the probe config (Authorization header is sent)" do
+      kconfig = Kubernetes::Configuration.new
+      kconfig.api_key["authorization"] = "Bearer probe-token"
+      kconfig.host = "127.0.0.1:1"
+      kconfig.scheme = "http"
+      kconfig.ssl_ca_cert = nil
+      KubeRails.config.connection = kconfig
+
+      expect { KubeRails.connected? }.to raise_error(KubeRails::Unavailable)
+      expect(kconfig.api_key["BearerToken"]).to eq("Bearer probe-token")
+    end
   end
 end
 

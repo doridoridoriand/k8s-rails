@@ -45,7 +45,11 @@ module KubeRails
       # `/version` call via VersionApi and returns true on success. Raises
       # KubeRails::Unavailable / ApiError on failure (the app may rescue).
       def connected?
-        VersionApiProbe.new(build_configuration).probe
+        config = build_configuration
+        # The probe also authenticates — apply the K1 bridge or the Authorization
+        # header would be empty on clusters where /version requires auth.
+        bridge_bearer_token(config)
+        VersionApiProbe.new(config).probe
       end
 
       # Reset cached connection + transport (test support, §5.1).
