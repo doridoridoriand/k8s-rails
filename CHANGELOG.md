@@ -2,7 +2,7 @@
 
 `kuberails` の全 notable な変更はこのファイルに記録する。
 
-## 0.1.0（リリース予定）
+## 0.1.0
 
 - **M0**: gem 骨子（gemspec / Gemfile / Rakefile / version / require 構造）
 - **M1**: Configuration + Client（lazy connect・K1 BearerToken 橋渡し）・例外体系
@@ -13,10 +13,8 @@
 - **M4**: ice-juice-immerse の `K8sService` 移行で動作検証
   （実クラスタ microk8s v1.33.13、kuberails#6 / ice-juice-immerse#63）
 - 応答は常に文字列キー（K2）・純 Ruby `Normalizer`（ActiveSupport 非依存）
-
-## Unreleased
-
-- リリース準備: README に検証済み Kubernetes サーババージョン（v1.33.x）を追記
-- `CHANGELOG.md` 追加、gemspec に `source_code_uri` / `changelog_uri` メタ情報追加
-- GitHub Actions 追加: push / PR 時に rspec + rubocop（テスト）、
-  タグ `v*` push 時に `gem build` + `gem push`（RubyGems 公開）
+- 対応 Ruby: `>= 3.3`（kruby 1.36.x が `>= 3.3` を要求するため）。
+  CI（GitHub Actions）で 3.3.8 / 3.3.x を matrix 検証
+- 対応 Kubernetes サーバ: v1.33.x で実クラスタ検証済み（README 参照）
+- 公開導線: GitHub Actions（push / PR で rspec + rubocop、タグ `v*` で
+  `gem build` + `gem push`）

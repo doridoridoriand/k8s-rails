@@ -18,12 +18,18 @@ concurrency:
 jobs:
   rspec-rubocop:
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # 下限（3.3 = kruby 1.36.x の required_ruby_version、実測 2026-09-21）
+        # と開発バージョン（.ruby-version）の両方を検証。
+        ruby: ["3.3.8", "3.3.1"]
     steps:
       - uses: actions/checkout@v4
       - name: Set up Ruby
         uses: ruby/setup-ruby@v1
         with:
-          ruby-version: ".ruby-version"
+          ruby-version: ${{ matrix.ruby }}
           bundler-cache: true
       - name: Run rspec + rubocop
         run: bundle exec rake

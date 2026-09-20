@@ -3,7 +3,8 @@
 Rails アプリが Kubernetes API・CRD を扱う際の**接続・CRD アクセス・障害処理の規約層**を
 gem として提供する。（設計書: [docs/design.md](docs/design.md), KBR-DESIGN-001）
 
-- Ruby: `>= 3.2`（開発は 3.3.8、`.ruby-version` で pin）
+- Ruby: `>= 3.3`（kruby 1.36.x が Ruby 3.3 を要求するため。開発は 3.3.8、
+  `.ruby-version` で pin、CI は 3.3.x matrix で検証）
 - kruby: `~> 1.36.0`（公式 Kubernetes OpenAPI クライアント）
 - Kubernetes サーバ: **v1.33.x で検証済み**（実クラスタ microk8s v1.33.13、2026-09-21）。
   kruby 1.36.x は k8s 1.36 系のクライアントであり、1.33 系のサーバとの組合せで

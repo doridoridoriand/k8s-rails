@@ -1,7 +1,7 @@
 # kuberails 設計書
 
 - 文書番号: KBR-DESIGN-001
-- 版: 0.1.4（案）
+- 版: 0.1.5（案）
 - 日付: 2026-09-15
 - 対象リポジトリ: kuberails（本設計の実装先）
 - 参照元: ice-juice-immerse `app/services/k8s_service.rb`（経験の元になった実装）
@@ -233,7 +233,7 @@ end
 
 | 依存 | 制約 | 理由 |
 |---|---|---|
-| Ruby | `>= 3.2` | immerse が 3.3.8 実行。gem として広く使う 3.2 を下限に |
+| Ruby | `>= 3.3` | kruby 1.36.x が `required_ruby_version ">= 3.3"` を宣言しているため（RubyGems API で実測 2026-09-21、1.36.0.1〜1.36.4.1 全バージョン）。当初案の `>= 3.2` は kruby 1.36.x と同時に解決できないため 3.3 に改訂 |
 | `kruby` | `~> 1.36.0` | immerse と同一 pin。`~> 1.36.0` は 1.36.x のみ許可（`~> 1.36` 形式は 1.37 以降も許容してしまうため使用しない）。新しめの kruby に対応する場合は §7 の確認事項（client.rb 4 メソッド・K1 橋渡し）を済ませてから明示的に上げ替える |
 | `activesupport` | **任意**（`>= 7.0`） | `defined?(ActiveSupport::Notifications)` でガード（計測のみ、§8）。Rails 無し環境（Cron スクリプト等）でも動作する必要がある — レスポンスの文字列キー化（K2）はこれに依存せず、gem 内部の純 Ruby 変換で担う（§5.2） |
 | `rspec` / `rubocop` | 開発依存 | spec / lint |
@@ -338,8 +338,15 @@ PR の差分を最小化）。
   - タグ `v*` push で `gem build` + `gem push`（RubyGems）を自動実行。
     タグ名と gemspec の `VERSION` の不一致は CI で検出して失敗させる
   - 公開権限はリポジトリ Secrets `GEM_HOST_API_KEY`（RubyGems API key）。
-    初回は RubyGems アカウント作成 + `gem owner kuberails <username>` を owner が実施
+    未取得の gem は**初回 push が所有権の取得**のため、owner の初回手順は
+    RubyGems アカウント作成 → `gem signin` → API Keys 画面で API key 発行 →
+    `GEM_HOST_API_KEY` 登録 → tag push（この CI の push が初回公開）の順。
+    `gem owner` は `--add` による**追加** owner のみ（位置引数に user を取る
+    構文は存在しない・gem 4.0.7 `gem owner --help` で実測 2026-09-21）
+  - **tag 前に CHANGELOG.md を確定する**こと（publish workflow は書き換えないため、
+    tag 時点の内容が公開 gem に同梱される）
   - テスト CI（`.github/workflows/test.yml`）は push / PR 時に rspec + rubocop を実行。
+    Ruby 3.3.x を matrix で検証（下限 = kruby 1.36.x の `>= 3.3`）。
     テストはクラスタ不要（§9・スタブ注入）のため v0.1 は runner 上のユニットのみ。
     kind / 実クラスタ E2E の CI 化は v0.2 対象（§9・§10）
 - `README` に「kruby pin」「対応 k8s バージョン（実測 v1.33.x で検証済み）」「K1 橋渡しの背景」
@@ -354,3 +361,4 @@ PR の差分を最小化）。
 | 0.1.2 | 2026-09-18 | M1 実装にあたって kruby 1.36.2.1 を実機確認した差分を反映: `connected?` の endpoint を `VersionApi#get_code`（GET /version/）に修正、転送失敗（DNS/timeout/接続拒否）が `ApiError(code == 0)` として surfacing することを §5.2/§5.4 に明記、文字列キー化を常に `Normalizer`（`deep_stringify_keys` 経路廃止）に統一 | 実装反映済み |
 | 0.1.3 | 2026-09-20 | M3 実装に伴う §8 の軽微明確化: notification の `operation` は symbol・`status` は文字列であること、例外は発火後そのまま raise（swallow しない）こと、no-op 時（AS 無 / instrumentation: false）もブロック値がそのまま返ること。加えて `connected?` の戻り値記述を実装に合わせ修正（false を返す経路なし・失敗は raise）、テストスタブのメソッド名を kruby `CustomObjectsApi` 形式（`*_namespaced_custom_object`）に修正 | 実装反映済み |
 | 0.1.4 | 2026-09-21 | リリース準備（§13）: 公開導線を手動 `gem push` から**タグ基準の GitHub Actions**（`test.yml` / `publish.yml`）に更新、README に検証済み k8s サーババージョン（v1.33.x / microk8s v1.33.13）を追記、CHANGELOG.md を同梱、gemspec に `source_code_uri` / `changelog_uri` / `allowed_push_host` メタ情報を追加 | 実装反映済み |
+| 0.1.5 | 2026-09-21 | PR #11 レビュー対応（Codex/Copilot 5 件・3 系統）: ①未取得 gem の owner 取得手順を「初回 push が所有権取得」に修正（`gem owner kuberails <user>` は無効構文・`gem owner --help` 実測、`--add` は追加のみ）・publish.yml / §13 ②テスト CI を Ruby 3.3.x matrix に（**`>= 3.2` は kruby 1.36.x の `>= 3.3` と非整合だったため、§6・gemspec・README の Ruby 下限を 3.3 に改訂**・RubyGems API で 1.36.x 全 7 バージョン実測）③tag 前の CHANGELOG 確定を手順化（publish workflow は CHANGELOG を書き換えないため） | 実装反映済み |

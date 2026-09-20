@@ -2,11 +2,20 @@
 #
 # 公開は v0.1 完成後、タグ基準で行う（設計書 §13）。公開権限は
 # RubyGems の API key で、リポジトリ Secrets `GEM_HOST_API_KEY` に登録する。
-# user 側の作業: RubyGems.org アカウントを作成し、
-#   gem signin && gem owner kuberails <your-rubygems-username>
-# で owner を握ってから、API key（`gem owner` 画面で発行）を
-# https://github.com/doridoridoriand/kuberails/settings/secrets/actions
-# の `GEM_HOST_API_KEY` に登録。
+# user 側の初回公開手順（未取得の gem は **初回 push が所有権の取得** —
+# `gem owner` は `--add` による追加 owner のみで、位置引数に user を
+# 取る構文は存在しない）:
+#   1. RubyGems.org アカウントを作成・`gem signin`
+#   2. API key を発行（RubyGems.org → Profile → API Keys）し、
+#      https://github.com/doridoridoriand/kuberails/settings/secrets/actions
+#      の `GEM_HOST_API_KEY` に登録
+#   3. `git tag v0.1.0 && git push origin v0.1.0` → この CI が初回 push する
+# 以降 `gem owner kuberails --add <username>` で owner 追加が必要になったら
+# そのコマンドを使う（--add は必須）。
+#
+# **tag 前に CHANGELOG.md を確定すること**: 本 workflow は CHANGELOG を
+# 書き換えないため、tag 時点の内容がそのまま公開 gem に同梱される
+# （「Unreleased」のまま tag すると未リリースとして公開される）。
 #
 # タグは gemspec の VERSION と一致させること（v0.1.0 / v0.2.0 / …）。
 # 不一致なら build される gem の version とタグがズレるため CI で検出して fail。
