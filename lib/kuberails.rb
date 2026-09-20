@@ -89,6 +89,11 @@ module KubeRails
         payload[:status] = "api_error"
         raise
       ensure
+        # Fallback for exceptions outside the KubeRails hierarchy (e.g. a
+        # programming error like NoMethodError from a malformed stub): keep
+        # the documented status enum (ok/unavailable/api_error) intact while
+        # re-raising the original exception.
+        payload[:status] ||= "api_error"
         payload[:duration_ms] = ((Process.clock_gettime(Process::CLOCK_MONOTONIC) - started) * 1_000).round(2)
         ActiveSupport::Notifications.instrument("kuberails.request", payload)
       end

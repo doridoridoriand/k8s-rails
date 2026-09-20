@@ -66,6 +66,23 @@ RSpec.describe "KubeRails.instrument" do
     expect(@events.first[1][:status]).to eq("unavailable")
   end
 
+  it "falls back to status api_error for exceptions outside the KubeRails hierarchy" do
+    KubeRails.config.instrumentation = true
+    bad = Class.new do
+      def list_namespaced_custom_object(*) = raise NoMethodError, "malformed stub"
+
+      def get_namespaced_custom_object(*) = {}
+      def create_namespaced_custom_object(*) = {}
+      def patch_namespaced_custom_object(*) = {}
+    end.new
+    KubeRails.config.api_client = bad
+    wf = declare
+
+    expect { wf.list }.to raise_error(NoMethodError)
+    expect(@events.size).to eq(1)
+    expect(@events.first[1][:status]).to eq("api_error")
+  end
+
   it "is a no-op when instrumentation is explicitly disabled" do
     KubeRails.config.instrumentation = false
     wf = declare
