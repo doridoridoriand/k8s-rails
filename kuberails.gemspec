@@ -16,7 +16,11 @@ Gem::Specification.new do |spec|
   spec.license = "MIT"
   # kruby 1.36.x は required_ruby_version ">= 3.3"（RubyGems API で実測 2026-09-21、
   # 1.36.0.1〜1.36.4.1 全バージョン）。実行時依存の下限に合わせる。
-  spec.required_ruby_version = ">= 3.3"
+  # 上限 `< 4.0` は「宣言した minor を必ず CI で検証する」方針のため（レビュー対応・
+  # 2026-09-21）: 2026-09-21 時点で Ruby 3.5 は preview（ruby/ruby タグ
+  # v3_5_0_preview1）、4.0 は stable（v4.0.7）。未検証の 4.x を宣言範囲から
+  # 除外し、4.0 対応検証は v0.2 以降で行う。
+  spec.required_ruby_version = [">= 3.3", "< 4.0"]
 
   # RubyGems.org ページに source / changelog リンクを表示させるためのメタ情報。
   spec.metadata["source_code_uri"] = "https://github.com/doridoridoriand/kuberails"

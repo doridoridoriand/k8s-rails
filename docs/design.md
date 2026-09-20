@@ -1,7 +1,7 @@
 # kuberails 設計書
 
 - 文書番号: KBR-DESIGN-001
-- 版: 0.1.7（案）
+- 版: 0.1.8（案）
 - 日付: 2026-09-15
 - 対象リポジトリ: kuberails（本設計の実装先）
 - 参照元: ice-juice-immerse `app/services/k8s_service.rb`（経験の元になった実装）
@@ -233,7 +233,7 @@ end
 
 | 依存 | 制約 | 理由 |
 |---|---|---|
-| Ruby | `>= 3.3` | kruby 1.36.x が `required_ruby_version ">= 3.3"` を宣言しているため（RubyGems API で実測 2026-09-21、1.36.0.1〜1.36.4.1 全バージョン）。当初案の `>= 3.2` は kruby 1.36.x と同時に解決できないため 3.3 に改訂 |
+| Ruby | `>= 3.3, < 4.0` | 下限: kruby 1.36.x が `required_ruby_version ">= 3.3"` を宣言（RubyGems API で実測 2026-09-21、1.36.0.1〜1.36.4.1 全バージョン）。上限: 「宣言した Ruby minor を必ず CI で検証する」方針（レビュー対応・2026-09-21）— 2026-09-21 時点で Ruby 4.0 は stable（v4.0.7）だが未検証、3.5 は preview（v3_5_0_preview1）のため、宣言範囲を 3.x に限定。4.0 / 3.5 対応は v0.2 以降で検証の上宣言に含める |
 | `kruby` | `~> 1.36.0` | immerse と同一 pin。`~> 1.36.0` は 1.36.x のみ許可（`~> 1.36` 形式は 1.37 以降も許容してしまうため使用しない）。新しめの kruby に対応する場合は §7 の確認事項（client.rb 4 メソッド・K1 橋渡し）を済ませてから明示的に上げ替える |
 | `activesupport` | **任意**（`>= 7.0`） | `defined?(ActiveSupport::Notifications)` でガード（計測のみ、§8）。Rails 無し環境（Cron スクリプト等）でも動作する必要がある — レスポンスの文字列キー化（K2）はこれに依存せず、gem 内部の純 Ruby 変換で担う（§5.2） |
 | `rspec` / `rubocop` | 開発依存 | spec / lint |
@@ -350,11 +350,13 @@ PR の差分を最小化）。
   - **tag 前に CHANGELOG.md を確定する**こと（publish workflow は書き換えないため、
     tag 時点の内容が公開 gem に同梱される）
   - テスト CI（`.github/workflows/test.yml`）は push / PR 時に rspec + rubocop を実行。
-    宣言されたサポート Ruby の**全 minor** を matrix で検証:
-    3.3.0（下限・kruby 1.36.x の `>= 3.3` は 3.3.0 を含む）・3.3.8（開発）・
-    3.4.10（最新 stable・ruby-lang.org 実測 2026-09-21）。
-    `>= 3.3` の宣言は新 minor を自動的に含むため、新 stable minor が出たら
-    matrix への追加を忘れないこと。
+    gemspec の宣言範囲（`>= 3.3, < 4.0`）を matrix で検証:
+    3.3.0（下限・kruby 1.36.x の `>= 3.3`）・3.3.8（開発）・
+    3.4.10（3.x 系の最新 stable・2026-09-21 時点。3.5 は preview、
+    4.0 は宣言範囲外のため未検証・v0.2 以降で検討）。
+    **宣言範囲を常に matrix がカバーする**こと（`< 4.0` 上限により、
+    4.x のリリースは宣言範囲外。stable 化された新 3.x minor が出たら
+    matrix への追加を忘れないこと）。
     テストはクラスタ不要（§9・スタブ注入）のため v0.1 は runner 上のユニットのみ。
     kind / 実クラスタ E2E の CI 化は v0.2 対象（§9・§10）
 - `README` に「kruby pin」「対応 k8s バージョン（実測 v1.33.x で検証済み）」「K1 橋渡しの背景」
@@ -372,3 +374,4 @@ PR の差分を最小化）。
 | 0.1.5 | 2026-09-21 | PR #11 レビュー対応（Codex P2 + Copilot M/L 3 系統）: ①未取得 gem の owner 取得手順を「初回 push が所有権取得」に修正（`gem owner kuberails <user>` は無効構文・`gem owner --help` 実測、`--add` は追加のみ）・publish.yml / §13 ②テスト CI を Ruby 3.3.x matrix に（**`>= 3.2` は kruby 1.36.x の `>= 3.3` と非整合だったため、§6・gemspec・README の Ruby 下限を 3.3 に改訂**・RubyGems API で 1.36.x 全 7 バージョン実測）③tag 前の CHANGELOG 確定を手順化（publish workflow は CHANGELOG を書き換えないため） | 実装反映済み |
 | 0.1.6 | 2026-09-21 | PR #11 レビュー第 2 波対応（Copilot ×2）: ①publish workflow に `verify` job（サポート Ruby 全バージョンの rake matrix）を追加し push job を `needs: verify` でゲート化（独立 Test workflow は tag 時に gem push をブロックできないため）・§13 ②テスト matrix の下限を 3.3.1 から **3.3.0** に（gemspec `>= 3.3` は 3.3.0 を含むため、宣言された最低バージョンを実際に検証） | 実装反映済み |
 | 0.1.7 | 2026-09-21 | PR #11 レビュー第 3 波対応（Copilot ×1）: `>= 3.3` が Ruby 3.4+ も含むため、テスト / verify matrix に **3.4.10（最新 stable・ruby-lang.org 実測）** を追加（3.3.0 / 3.3.8 / 3.4.10 の 3 系統）。新しい stable minor が出た際の matrix 追加を §13 に手順として明記 | 実装反映済み |
+| 0.1.8 | 2026-09-21 | PR #11 レビュー第 4 波対応（Copilot ×3）: 指摘（「Ruby 3.5 が stable 化したため matrix に追加せよ」）を検証した結果 **3.5 は preview であり claim は誤り**（ruby/ruby タグ `v3_5_0_preview1`・2026-09-21 実測）と判明。ただし指摘の根本（宣言と検証範囲のズレ）は**Ruby 4.0 が stable（v4.0.7）だったため**実際に存在した。対策として宣言範囲を **`>= 3.3, < 4.0` に改訂**（gemspec / §6 / README / CHANGELOG）し、宣言範囲 = matrix 検証範囲（3.3.0 / 3.3.8 / 3.4.10）を一致。4.0 / 3.5 対応は v0.2 以降で検証の上宣言に含める方針 | 実装反映済み |
