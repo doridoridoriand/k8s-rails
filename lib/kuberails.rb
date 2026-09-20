@@ -61,6 +61,51 @@ module KubeRails
     def crd(group:, version:, plural:, kind:, namespace: nil, readonly: true)
       CRD.declare(group:, version:, plural:, kind:, namespace:, readonly:)
     end
+
+    # Design §8: run an API call inside a `kuberails.request` notification.
+    #
+    #   KubeRails.instrument(:list, group: "g", version: "v1", plural: "p", namespace: "ns") do
+    #     # ... actual transport call ...
+    #   end
+    #
+    # The notification payload is
+    #   { operation:, group:, version:, plural:, namespace:, duration_ms:,
+    #     status: "ok" | "unavailable" | "api_error" }.
+    # The block's return value always flows through unchanged. No-op when
+    # `config.instrumentation` is false or ActiveSupport is not loaded.
+    # rubocop:disable Metrics/AbcSize, Metrics/MethodLength -- fixed §8 wrapper
+    def instrument(operation, metadata)
+      return yield unless instrumentation_enabled?
+
+      payload = { operation: operation }.merge(metadata)
+      started = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+      begin
+        result = yield
+        payload[:status] = "ok"
+      rescue KubeRails::Unavailable
+        payload[:status] = "unavailable"
+        raise
+      rescue KubeRails::ApiError, KubeRails::NotFound
+        payload[:status] = "api_error"
+        raise
+      ensure
+        # Fallback for exceptions outside the KubeRails hierarchy (e.g. a
+        # programming error like NoMethodError from a malformed stub): keep
+        # the documented status enum (ok/unavailable/api_error) intact while
+        # re-raising the original exception.
+        payload[:status] ||= "api_error"
+        payload[:duration_ms] = ((Process.clock_gettime(Process::CLOCK_MONOTONIC) - started) * 1_000).round(2)
+        ActiveSupport::Notifications.instrument("kuberails.request", payload)
+      end
+      result
+    end
+    # rubocop:enable Metrics/AbcSize, Metrics/MethodLength
+
+    # True only when the user opted in AND ActiveSupport is actually loaded
+    # (spec helper may stub this to exercise the no-op path deterministically).
+    def instrumentation_enabled?
+      config.instrumentation && defined?(ActiveSupport::Notifications)
+    end
   end
 
   # Whether the kruby-dependent client file has actually been required yet
