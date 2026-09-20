@@ -1,5 +1,10 @@
 # 公開: タグ `v*` を push したら gem build + gem push（RubyGems）を自動実行。
 #
+# **publish のゲート**: 公開前に `verify` job（サポート Ruby 全バージョンの
+# rake）が成功したことのみに push job が依存する。独立した Test workflow は
+# 並列で完結するため、tag push の瞬間に失敗してもこの workflow の gem push
+# をブロックできない（そのため本 workflow 内に前提テストを置く）。
+#
 # 公開は v0.1 完成後、タグ基準で行う（設計書 §13）。公開権限は
 # RubyGems の API key で、リポジトリ Secrets `GEM_HOST_API_KEY` に登録する。
 # user 側の初回公開手順（未取得の gem は **初回 push が所有権の取得** —
@@ -30,7 +35,26 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  # 前提テスト: 宣言されたサポート Ruby（下限 3.3.0 = kruby 1.36.x の
+  # required_ruby_version）の全バージョンで rake を通してからでないと公開しない。
+  verify:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        ruby: ["3.3.8", "3.3.0"]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Ruby
+        uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: ${{ matrix.ruby }}
+          bundler-cache: true
+      - name: Run rspec + rubocop
+        run: bundle exec rake
+
   build-and-push:
+    needs: verify
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -50,9 +74,6 @@ jobs:
             exit 1
           fi
           echo "tag=$TAG version=$VERSION — OK"
-
-      - name: Run tests before publishing
-        run: bundle exec rake
 
       - name: Build gem
         run: gem build kuberails.gemspec
