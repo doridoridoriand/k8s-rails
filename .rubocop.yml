@@ -20,7 +20,18 @@ Metrics/BlockLength:
 # The internal transport (Client#StringKeyedAdapter) and kruby's CustomObjectsApi
 # use a fixed (group, version, namespace, plural, ...) signature — the patch
 # variant legitimately carries 6 args. Exempt that method pair from the 5-arg rule.
+# The CRD declaration signature (group/version/plural/kind/namespace/readonly)
+# is fixed by design §5.3 — exempted too.
 Metrics/ParameterLists:
   Exclude:
+    - "lib/kuberails.rb"
     - "lib/kuberails/client.rb"
+    - "lib/kuberails/crd.rb"
+    - "lib/kuberails/resource.rb"
     - "spec/client_spec.rb"
+    - "spec/resource_spec.rb"
+
+# CRD.declare's body is a fixed 6-key keyword pass-through (design §5.3).
+Metrics/MethodLength:
+  Exclude:
+    - "lib/kuberails/crd.rb"

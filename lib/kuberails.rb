@@ -34,11 +34,12 @@ module KubeRails
       config
     end
 
-    # Reset configuration, the cached transport, and (M2) declared CRDs.
+    # Reset configuration, the cached transport, and declared CRDs.
     # Test support (§5.1).
     def reset!
       @config = nil
       @configured = false
+      CRD.clear!
       Client.reset! if client_loaded?
     end
 
@@ -51,6 +52,14 @@ module KubeRails
     # Lightweight connectivity check (§5.2). Raises Unavailable/ApiError.
     def connected?
       Client.connected?
+    end
+
+    # Declare a CRD and return its Resource class (design §5.3, K5).
+    #   Workflow = KubeRails.crd(group: "argoproj.io", version: "v1alpha1",
+    #                            plural: "workflows", kind: "Workflow")
+    # Re-declaring the same kind raises KubeRails::RedeclarationError.
+    def crd(group:, version:, plural:, kind:, namespace: nil, readonly: true)
+      CRD.declare(group:, version:, plural:, kind:, namespace:, readonly:)
     end
   end
 
@@ -67,3 +76,4 @@ require_relative "kuberails/version"
 require_relative "kuberails/errors"
 require_relative "kuberails/configuration"
 require_relative "kuberails/normalizer"
+require_relative "kuberails/crd"
