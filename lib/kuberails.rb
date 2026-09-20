@@ -10,6 +10,11 @@
 # `KubeRails.connected?` call. This lets the gem be `require`d even when no
 # cluster is reachable and keeps kruby's load cost out of app boot.
 module KubeRails
+  # Lazy load (§7): referencing KubeRails::Client (e.g. Client.build) is the
+  # moment kruby is required — never at gem require time. Direct constant
+  # access works, while a plain `require "kuberails"` stays kruby-free.
+  autoload :Client, File.expand_path("kuberails/client", __dir__)
+
   class << self
     # Settings, set once via `configure` (§5.1).
     def config
@@ -34,32 +39,26 @@ module KubeRails
     def reset!
       @config = nil
       @configured = false
-      Client.reset! if loaded?(:client)
+      Client.reset! if client_loaded?
     end
 
     # The shared transport (design §5.2). Triggers the lazy load of the
     # kruby-dependent Client on first call.
     def client
-      load_client.build
+      Client.build
     end
 
     # Lightweight connectivity check (§5.2). Raises Unavailable/ApiError.
     def connected?
-      load_client.connected?
+      Client.connected?
     end
   end
 
-  # --- Lazy loading (kruby stays out of boot time) -------------------------
-
-  # Whether a sub-component has been required already.
-  def self.loaded?(name)
-    $LOADED_FEATURES.any? { |f| f.end_with?("kuberails/#{name}.rb") }
-  end
-
-  # The Client (and kruby) are loaded on first use, never at require time.
-  def self.load_client
-    require_relative "kuberails/client" unless loaded?(:client)
-    const_get(:Client)
+  # Whether the kruby-dependent client file has actually been required yet
+  # (an autoloaded-but-unreferenced constant still counts as "not loaded"
+  # for `defined?`/`const_defined?`, so $LOADED_FEATURES is authoritative).
+  def self.client_loaded?
+    $LOADED_FEATURES.any? { |f| f.end_with?("kuberails/client.rb") }
   end
 end
 
