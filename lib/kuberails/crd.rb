@@ -27,8 +27,15 @@ module KubeRails
     end
 
     # Declare a CRD and return its Resource class (K5: group/version/plural/
-    # kind are explicit — never guessed).
+    # kind are explicit — never guessed). `readonly` must be an explicit
+    # boolean: mutations are enabled ONLY by `readonly: false` (design §5.3 /
+    # K4), so nil/other values fail fast instead of silently allowing writes.
     def self.declare(group:, version:, plural:, kind:, namespace: nil, readonly: true)
+      unless [true, false].include?(readonly)
+        raise ArgumentError,
+              "readonly must be true or false (got #{readonly.inspect}) — mutations require an explicit readonly: false"
+      end
+
       if registered.key?(kind)
         raise RedeclarationError, "CRD kind #{kind} is already declared — re-declaration is a configuration mistake"
       end
