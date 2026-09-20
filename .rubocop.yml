@@ -1,13 +1,13 @@
 # rubocop configuration for kuberails (design §10 M3).
 #
-# Baseline: rubocop's defaults for Ruby 3.2. Project conventions on top:
-#   - double-quoted strings (matches the design doc examples and immerse)
+# Baseline: rubocop's defaults for Ruby 3.3. Project conventions on top:
+#   - double-quoted strings (matches the design doc examples and the consumer app)
 #   - frozen_string_literal enforced (Style/FrozenStringLiteralComment)
 #
 # Specs are exempt from style cops that are about production code shape
 # (metrics, long blocks) — test readability wins there.
 AllCops:
-  TargetRubyVersion: 3.2
+  TargetRubyVersion: 3.3
   NewCops: disable
   SuggestExtensions: false
   Include:

@@ -10,13 +10,13 @@
 - **M2**: CRD 宣言 DSL + Resource（`list` / `find` / `find_or_nil` / `create` / `patch`、
   `readonly` は明示 boolean、再宣言は `RedeclarationError`）
 - **M3**: 計測（ActiveSupport::Notifications 経由、無効時 no-op）+ README + rubocop
-- **M4**: ice-juice-immerse の `K8sService` 移行で動作検証
-  （実クラスタ microk8s v1.33.13、kuberails#6 / ice-juice-immerse#63）
+- **M4**: consumer Rails アプリの K8s サービス移行で動作検証
+  （実クラスタ microk8s v1.33.13）
 - 応答は常に文字列キー（K2）・純 Ruby `Normalizer`（ActiveSupport 非依存）
 - 対応 Ruby: `>= 3.3, < 4.0`（下限は kruby 1.36.x の `>= 3.3`。上限は
   未検証の Ruby 4.x を宣言から除外するため。4.0 / 3.5 対応は v0.2 以降
   で検証の上宣言に含める）。
   CI（GitHub Actions）で 3.3.0 / 3.3.8 / 3.4.10 の matrix 検証
 - 対応 Kubernetes サーバ: v1.33.x で実クラスタ検証済み（README 参照）
-- 公開導線: GitHub Actions（push / PR で rspec + rubocop、タグ `v*` で
-  `gem build` + `gem push`）
+- 公開導線: owner のローカル PC から手動 `gem push`（rake 全緑確認 +
+  CHANGELOG 確定後に実施。CI の自動公開は行わない）
