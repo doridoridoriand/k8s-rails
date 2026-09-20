@@ -17,7 +17,7 @@ module KubeRails
     attr_accessor :connection
 
     # テスト専用（§5.1）。CustomObjectsApi と同型の 4 メソッド
-    # （get/list/create/patch_namespaced_custom_object）を実装した素の
+    # （`get_namespaced_custom_object` 等の *_namespaced_custom_object 4 メソッド）を実装した素の
     # オブジェクトを指定すると、Client.build は接続解決をスキープしてこれを
     # 内部トランスポートとして使う。
     attr_accessor :api_client

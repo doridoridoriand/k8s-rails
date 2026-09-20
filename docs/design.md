@@ -142,7 +142,7 @@ end
 |---|---|---|
 | `namespace` | `"default"` | CRD 宣言が namespace 未指定時のデフォルト |
 | `connection` | `nil`（自動検出） | `Kubernetes::Configuration` インスタンス。認証を上書きする場合に指定 |
-| `api_client` | `nil` | **テスト専用**: kruby の `CustomObjectsApi` と同型の 4 メソッド（`get/list/create/patch_namespaced_custom_object`）を実装する素のオブジェクト。指定時は `Client.build` が接続解決をスキープして `StringKeyedAdapter` で包んで使う（§5.2・§9） |
+| `api_client` | `nil` | **テスト専用**: kruby の `CustomObjectsApi` と同型の 4 メソッド（`get_namespaced_custom_object` / `list_namespaced_custom_object` / `create_namespaced_custom_object` / `patch_namespaced_custom_object`）を実装する素のオブジェクト。指定時は `Client.build` が接続解決をスキープして `StringKeyedAdapter` で包んで使う（§5.2・§9） |
 | `instrumentation` | `true` | `ActiveSupport::Notifications` で計測する（§8） |
 
 - 設定は `KubeRails.configure` で**一度だけ**。再実行は警告（`Warning`）+ 無視。
@@ -246,7 +246,7 @@ end
 - `lib/kuberails/client.rb` **のみ**が `require "kubernetes"` してよい。
   他のファイルは kruby 定数・クラスを参照しない。
 - kruby の `CustomObjectsApi` メソッド呼び出しは `client.rb` 内の
-  `get/list/create/patch` 4 メソッドに集約する。`resource.rb` は
+  `*_namespaced_custom_object` の 4 メソッド（`get_namespaced_custom_object` 等）に集約する。`resource.rb` は
   `KubeRails.client.get(group, version, ns, plural, name)` のような **gem 内部 API** だけを使う。
 - kruby 上げ替え時の作業は (1) client.rb 4 メソッドのシグネチャ確認、
   (2) K1 橋渡しの要否確認、に収まることをテスト（§9）で担保する。
@@ -275,7 +275,7 @@ kuberails.request  payload: { operation: :list, group:, version:, plural:, names
 
 | レイヤー | 手法 | 対象 |
 |---|---|---|
-| ユニット | `KubeRails.config.api_client` に**スタブ**（kruby `CustomObjectsApi` と同型の 4 メソッド `get/list/create/patch_namespaced_custom_object` を実装する素のオブジェクト。`StringKeyedAdapter` がこの形式を呼ぶ）を注入 | client（橋渡し・例外変換）、resource（整形・readonly 制限）、crd（メソッド生成） |
+| ユニット | `KubeRails.config.api_client` に**スタブ**（kruby `CustomObjectsApi` と同型の 4 メソッド `get_namespaced_custom_object` / `list_namespaced_custom_object` / `create_namespaced_custom_object` / `patch_namespaced_custom_object` を実装する素のオブジェクト。`StringKeyedAdapter` がこの形式を呼ぶ）を注入 | client（橋渡し・例外変換）、resource（整形・readonly 制限）、crd（メソッド生成） |
 | 設定 | spec 間で `KubeRails.reset!` | 宣言の破棄・再接続 |
 | 集積（任意） | GitHub Actions で **kind**（または既存 microk8s に接続するジョブ）で実クラスタ E2E | v0.1 の必須ではない。**推奨**: consumer app 移行時の検証を兼ねる |
 
