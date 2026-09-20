@@ -8,5 +8,6 @@ RSpec.configure do |config|
   end
   config.disable_monkey_patching!
   config.order = :random
+  Dir[File.expand_path("support/**/*.rb", __dir__)].sort.each { |f| require f }
   Kernel.srand config.seed
 end
