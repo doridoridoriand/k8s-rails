@@ -1,7 +1,7 @@
 # kuberails 設計書
 
 - 文書番号: KBR-DESIGN-001
-- 版: 0.1.2（案）
+- 版: 0.1.3（案）
 - 日付: 2026-09-15
 - 対象リポジトリ: kuberails（本設計の実装先）
 - 参照元: consumer app `app/services/k8s_service.rb`（経験の元になった実装）
@@ -256,9 +256,15 @@ end
 `instrumentation: true` かつ ActiveSupport 存在時、各 API 呼び出しを計測する:
 
 ```
-kuberails.request  payload: { operation: "list", group:, version:, plural:, namespace:,
-                               duration_ms:, status: "ok" | "unavailable" | "api_error" }
+kuberails.request  payload: { operation: :list, group:, version:, plural:, namespace:
+                               # operation は symbol（:list / :find / :create / :patch）
+                               duration_ms:  # float（ミリ秒・小数点 2 桁）
+                               status: "ok" | "unavailable" | "api_error" }
 ```
+
+- `status` は **文字列**（`"ok"` / `"unavailable"` / `"api_error"`）、
+  `operation` は **symbol**。例外は notification を発した上で **そのまま raise**
+  される（計測は swallow しない）。
 
 - Rails アプリではこの notification を `ActiveSupport::Notifications` /
   `log_subscription` で拾える（ログ・ダッシュボード表示）。
@@ -337,3 +343,4 @@ PR の差分を最小化）。
 | 0.1 | 2026-09-15 | 初版（案）。consumer app consumer app 側の K8s service の知見 K1–K5 を基に作成 | 未承認 |
 | 0.1.1 | 2026-09-18 | PR #1 レビュー対応: 文字列キー化の純 Ruby 経路（ActiveSupport 非依存）、401/403→ApiError 統一、`throw`→`raise`、core v1 を built-in 扱いに修正、`~> 1.36.0` に統一、テスト注入の `api_client` 追加、例外ツリーに `ReadOnlyError`/`RedeclarationError` 追記、初期化子例を汎用化 | レビュー反映済み |
 | 0.1.2 | 2026-09-18 | M1 実装にあたって kruby 1.36.2.1 を実機確認した差分を反映: `connected?` の endpoint を `VersionApi#get_code`（GET /version/）に修正、転送失敗（DNS/timeout/接続拒否）が `ApiError(code == 0)` として surfacing することを §5.2/§5.4 に明記、文字列キー化を常に `Normalizer`（`deep_stringify_keys` 経路廃止）に統一 | 実装反映済み |
+| 0.1.3 | 2026-09-20 | M3 実装に伴う §8 の軽微明確化: notification の `operation` は symbol・`status` は文字列であること、例外は発火後そのまま raise（swallow しない）こと | 実装反映済み |
