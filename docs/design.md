@@ -268,7 +268,8 @@ kuberails.request  payload: { operation: :list, group:, version:, plural:, names
 
 - Rails アプリではこの notification を `ActiveSupport::Notifications` /
   `log_subscription` で拾える（ログ・ダッシュボード表示）。
-- ActiveSupport 無い環境では no-op（`KubeRails.instrument` が `nil` を返す）。
+- ActiveSupport 無い環境（または `instrumentation: false`）では no-op。
+  この場合も **ブロックの戻り値はそのまま返る**（`nil` にはならない）。
 
 ## 9. テスト戦略（クラスタ不要）
 
@@ -343,4 +344,4 @@ PR の差分を最小化）。
 | 0.1 | 2026-09-15 | 初版（案）。immerse K8sService の知見 K1–K5 を基に作成 | 未承認 |
 | 0.1.1 | 2026-09-18 | PR #1 レビュー対応: 文字列キー化の純 Ruby 経路（ActiveSupport 非依存）、401/403→ApiError 統一、`throw`→`raise`、core v1 を built-in 扱いに修正、`~> 1.36.0` に統一、テスト注入の `api_client` 追加、例外ツリーに `ReadOnlyError`/`RedeclarationError` 追記、初期化子例を汎用化 | レビュー反映済み |
 | 0.1.2 | 2026-09-18 | M1 実装にあたって kruby 1.36.2.1 を実機確認した差分を反映: `connected?` の endpoint を `VersionApi#get_code`（GET /version/）に修正、転送失敗（DNS/timeout/接続拒否）が `ApiError(code == 0)` として surfacing することを §5.2/§5.4 に明記、文字列キー化を常に `Normalizer`（`deep_stringify_keys` 経路廃止）に統一 | 実装反映済み |
-| 0.1.3 | 2026-09-20 | M3 実装に伴う §8 の軽微明確化: notification の `operation` は symbol・`status` は文字列であること、例外は発火後そのまま raise（swallow しない）こと | 実装反映済み |
+| 0.1.3 | 2026-09-20 | M3 実装に伴う §8 の軽微明確化: notification の `operation` は symbol・`status` は文字列であること、例外は発火後そのまま raise（swallow しない）こと、no-op 時（AS 無 / instrumentation: false）もブロック値がそのまま返ること | 実装反映済み |
