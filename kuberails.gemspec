@@ -14,7 +14,9 @@ Gem::Specification.new do |spec|
     "convention layer for Rails applications talking to the Kubernetes API, as a gem."
   spec.homepage = "https://github.com/doridoridoriand/kuberails"
   spec.license = "MIT"
-  spec.required_ruby_version = ">= 3.2"
+  # kruby 1.36.x は required_ruby_version ">= 3.3"（RubyGems API で実測 2026-09-21、
+  # 1.36.0.1〜1.36.4.1 全バージョン）。実行時依存の下限に合わせる。
+  spec.required_ruby_version = ">= 3.3"
 
   # RubyGems.org ページに source / changelog リンクを表示させるためのメタ情報。
   spec.metadata["source_code_uri"] = "https://github.com/doridoridoriand/kuberails"
