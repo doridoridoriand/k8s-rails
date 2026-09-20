@@ -31,12 +31,16 @@ module KubeRails
       # All objects in the namespace. Returns an array of string-keyed Hashes
       # (design §5.3: `[{ "name" => "...", ... }]`).
       def list(namespace: resolved_namespace)
-        transport.list(group_name, version_name, namespace, plural_name)["items"] || []
+        KubeRails.instrument(:list, instrument_meta(namespace)) do
+          transport.list(group_name, version_name, namespace, plural_name)["items"] || []
+        end
       end
 
       # One object by name. Raises KubeRails::NotFound when absent.
       def find(name, namespace: resolved_namespace)
-        transport.get(group_name, version_name, namespace, plural_name, name)
+        KubeRails.instrument(:find, instrument_meta(namespace)) do
+          transport.get(group_name, version_name, namespace, plural_name, name)
+        end
       end
 
       # Like `find`, but returns nil instead of raising on NotFound.
@@ -50,16 +54,25 @@ module KubeRails
       # KubeRails::ReadOnlyError (K4).
       def create(attributes, namespace: resolved_namespace)
         assert_writable
-        transport.create(group_name, version_name, namespace, plural_name, attributes)
+        KubeRails.instrument(:create, instrument_meta(namespace)) do
+          transport.create(group_name, version_name, namespace, plural_name, attributes)
+        end
       end
 
       # JSON Patch a named object. Same readonly restriction as `create`.
       def patch(name, operations, namespace: resolved_namespace)
         assert_writable
-        transport.patch(group_name, version_name, namespace, plural_name, name, operations)
+        KubeRails.instrument(:patch, instrument_meta(namespace)) do
+          transport.patch(group_name, version_name, namespace, plural_name, name, operations)
+        end
       end
 
       private
+
+      # Notification metadata for design §8 (`kuberails.request`).
+      def instrument_meta(namespace)
+        { group: group_name, version: version_name, plural: plural_name, namespace: }
+      end
 
       # Declared namespace wins; otherwise the gem default (resolved at call
       # time so `KubeRails.reset!` + reconfigure works in tests).

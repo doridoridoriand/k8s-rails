@@ -1,37 +1,59 @@
-# Minimal rubocop configuration for M0.
-# Full policy (line length, layout, project conventions) lands in M3.
+# rubocop configuration for kuberails (design §10 M3).
+#
+# Baseline: rubocop's defaults for Ruby 3.2. Project conventions on top:
+#   - double-quoted strings (matches the design doc examples and consumer app)
+#   - frozen_string_literal enforced (Style/FrozenStringLiteralComment)
+#
+# Specs are exempt from style cops that are about production code shape
+# (metrics, long blocks) — test readability wins there.
 AllCops:
   TargetRubyVersion: 3.2
   NewCops: disable
   SuggestExtensions: false
+  Include:
+    - "Gemfile"
+    - "Rakefile"
+    - "lib/**/*"
+    - "spec/**/*"
+  Exclude:
+    - "docs/**/*"
+    - "vendor/**/*"
 
-# Rails convention: double-quoted strings (matches design doc examples / consumer app).
 Style/StringLiterals:
   EnforcedStyle: double_quotes
 
-# Test files are exempt from naming/metrics style cops (full policy lands in M3).
-Naming/MethodParameterName:
-  Exclude:
-    - "spec/**/*"
+Style/FrozenStringLiteralComment:
+  Enabled: true
+
+Style/Documentation:
+  Enabled: false # module/class doc is nice, not enforced
+
+Layout/LineLength:
+  Max: 120
+
+# --- spec-only exemptions -------------------------------------------------
 Metrics/BlockLength:
   Exclude:
     - "spec/**/*"
+  Enabled: true
 
-# The internal transport (Client#StringKeyedAdapter) and kruby's CustomObjectsApi
-# use a fixed (group, version, namespace, plural, ...) signature — the patch
-# variant legitimately carries 6 args. Exempt that method pair from the 5-arg rule.
-# The CRD declaration signature (group/version/plural/kind/namespace/readonly)
-# is fixed by design §5.3 — exempted too.
-Metrics/ParameterLists:
-  Exclude:
-    - "lib/kuberails.rb"
-    - "lib/kuberails/client.rb"
-    - "lib/kuberails/crd.rb"
-    - "lib/kuberails/resource.rb"
-    - "spec/client_spec.rb"
-    - "spec/resource_spec.rb"
-
-# CRD.declare's body is a fixed 6-key keyword pass-through (design §5.3).
 Metrics/MethodLength:
   Exclude:
-    - "lib/kuberails/crd.rb"
+    - "spec/**/*"
+    - "lib/kuberails/crd.rb" # fixed 6-key keyword pass-through (design §5.3)
+
+Metrics/ParameterLists:
+  CountKeywordArgs: false
+  Max: 5
+  Exclude:
+    # kruby's CustomObjectsApi fixed signature (patch legitimately has 6 args);
+    # the spec test doubles mirror it.
+    - "lib/kuberails/client.rb"
+    - "spec/**/*"
+
+# Fixed (group, version, namespace, plural, ...) signatures come from kruby's
+# CustomObjectsApi and the §5.3 CRD declaration — the test doubles mirror that
+# signature, so both are exempted rather than renamed.
+Naming/MethodParameterName:
+  Exclude:
+    - "spec/**/*"

@@ -1,7 +1,7 @@
 # kuberails 設計書
 
 - 文書番号: KBR-DESIGN-001
-- 版: 0.1.2（案）
+- 版: 0.1.3（案）
 - 日付: 2026-09-15
 - 対象リポジトリ: kuberails（本設計の実装先）
 - 参照元: consumer app `app/services/k8s_service.rb`（経験の元になった実装）
@@ -142,7 +142,7 @@ end
 |---|---|---|
 | `namespace` | `"default"` | CRD 宣言が namespace 未指定時のデフォルト |
 | `connection` | `nil`（自動検出） | `Kubernetes::Configuration` インスタンス。認証を上書きする場合に指定 |
-| `api_client` | `nil` | **テスト専用**: Client の内部 API 4 メソッド（get/list/create/patch）を実装する完成オブジェクト。指定時は `Client.build` が接続解決をスキープしてこれを直接返す（§5.2・§9） |
+| `api_client` | `nil` | **テスト専用**: kruby の `CustomObjectsApi` と同型の 4 メソッド（`get_namespaced_custom_object` / `list_namespaced_custom_object` / `create_namespaced_custom_object` / `patch_namespaced_custom_object`）を実装する素のオブジェクト。指定時は `Client.build` が接続解決をスキープして `StringKeyedAdapter` で包んで使う（§5.2・§9） |
 | `instrumentation` | `true` | `ActiveSupport::Notifications` で計測する（§8） |
 
 - 設定は `KubeRails.configure` で**一度だけ**。再実行は警告（`Warning`）+ 無視。
@@ -152,9 +152,9 @@ end
 
 ```ruby
 KubeRails::Client.build   # → Kubernetes::CustomObjectsApi（lazy。初回呼び出し時に接続）
-KubeRails.connected?      # → true/false（/version 相当の軽量確認。v0.1 は
-                          #   kruby 1.36.x の VersionApi#get_code（GET /version/）1 回を
-                          #   例外変換後に行い、成功したら true。失敗は例外を raise）
+KubeRails.connected?      # → 成功時は true。失敗は KubeRails::Unavailable / ApiError を raise
+                          #   （false を返す経路なし）。/version 相当の軽量確認
+                          #   （kruby 1.36.x の VersionApi#get_code（GET /version/）1 回）
 ```
 
 `Client.build` が内部で行うこと（consumer app `consumer app 側の custom_objects_api` の中身を移設）:
@@ -246,7 +246,7 @@ end
 - `lib/kuberails/client.rb` **のみ**が `require "kubernetes"` してよい。
   他のファイルは kruby 定数・クラスを参照しない。
 - kruby の `CustomObjectsApi` メソッド呼び出しは `client.rb` 内の
-  `get/list/create/patch` 4 メソッドに集約する。`resource.rb` は
+  `*_namespaced_custom_object` の 4 メソッド（`get_namespaced_custom_object` 等）に集約する。`resource.rb` は
   `KubeRails.client.get(group, version, ns, plural, name)` のような **gem 内部 API** だけを使う。
 - kruby 上げ替え時の作業は (1) client.rb 4 メソッドのシグネチャ確認、
   (2) K1 橋渡しの要否確認、に収まることをテスト（§9）で担保する。
@@ -256,19 +256,26 @@ end
 `instrumentation: true` かつ ActiveSupport 存在時、各 API 呼び出しを計測する:
 
 ```
-kuberails.request  payload: { operation: "list", group:, version:, plural:, namespace:,
-                               duration_ms:, status: "ok" | "unavailable" | "api_error" }
+kuberails.request  payload: { operation: :list, group:, version:, plural:, namespace:
+                               # operation は symbol（:list / :find / :create / :patch）
+                               duration_ms:  # float（ミリ秒・小数点 2 桁）
+                               status: "ok" | "unavailable" | "api_error" }
 ```
+
+- `status` は **文字列**（`"ok"` / `"unavailable"` / `"api_error"`）、
+  `operation` は **symbol**。例外は notification を発した上で **そのまま raise**
+  される（計測は swallow しない）。
 
 - Rails アプリではこの notification を `ActiveSupport::Notifications` /
   `log_subscription` で拾える（ログ・ダッシュボード表示）。
-- ActiveSupport 無い環境では no-op（`KubeRails.instrument` が `nil` を返す）。
+- ActiveSupport 無い環境（または `instrumentation: false`）では no-op。
+  この場合も **ブロックの戻り値はそのまま返る**（`nil` にはならない）。
 
 ## 9. テスト戦略（クラスタ不要）
 
 | レイヤー | 手法 | 対象 |
 |---|---|---|
-| ユニット | `KubeRails.config.api_client` に**スタブ**（Client の内部 API 4 メソッド get/list/create/patch を実装する素のオブジェクト）を注入 | client（橋渡し・例外変換）、resource（整形・readonly 制限）、crd（メソッド生成） |
+| ユニット | `KubeRails.config.api_client` に**スタブ**（kruby `CustomObjectsApi` と同型の 4 メソッド `get_namespaced_custom_object` / `list_namespaced_custom_object` / `create_namespaced_custom_object` / `patch_namespaced_custom_object` を実装する素のオブジェクト。`StringKeyedAdapter` がこの形式を呼ぶ）を注入 | client（橋渡し・例外変換）、resource（整形・readonly 制限）、crd（メソッド生成） |
 | 設定 | spec 間で `KubeRails.reset!` | 宣言の破棄・再接続 |
 | 集積（任意） | GitHub Actions で **kind**（または既存 microk8s に接続するジョブ）で実クラスタ E2E | v0.1 の必須ではない。**推奨**: consumer app 移行時の検証を兼ねる |
 
@@ -337,3 +344,4 @@ PR の差分を最小化）。
 | 0.1 | 2026-09-15 | 初版（案）。consumer app consumer app 側の K8s service の知見 K1–K5 を基に作成 | 未承認 |
 | 0.1.1 | 2026-09-18 | PR #1 レビュー対応: 文字列キー化の純 Ruby 経路（ActiveSupport 非依存）、401/403→ApiError 統一、`throw`→`raise`、core v1 を built-in 扱いに修正、`~> 1.36.0` に統一、テスト注入の `api_client` 追加、例外ツリーに `ReadOnlyError`/`RedeclarationError` 追記、初期化子例を汎用化 | レビュー反映済み |
 | 0.1.2 | 2026-09-18 | M1 実装にあたって kruby 1.36.2.1 を実機確認した差分を反映: `connected?` の endpoint を `VersionApi#get_code`（GET /version/）に修正、転送失敗（DNS/timeout/接続拒否）が `ApiError(code == 0)` として surfacing することを §5.2/§5.4 に明記、文字列キー化を常に `Normalizer`（`deep_stringify_keys` 経路廃止）に統一 | 実装反映済み |
+| 0.1.3 | 2026-09-20 | M3 実装に伴う §8 の軽微明確化: notification の `operation` は symbol・`status` は文字列であること、例外は発火後そのまま raise（swallow しない）こと、no-op 時（AS 無 / instrumentation: false）もブロック値がそのまま返ること。加えて `connected?` の戻り値記述を実装に合わせ修正（false を返す経路なし・失敗は raise）、テストスタブのメソッド名を kruby `CustomObjectsApi` 形式（`*_namespaced_custom_object`）に修正 | 実装反映済み |
