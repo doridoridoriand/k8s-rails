@@ -62,11 +62,12 @@ Workflow.patch("wf-1", [{ op: "replace", path: "/spec/a", value: 2 }]) # 同左
 ## 接続確認
 
 ```ruby
-KubeRails.connected?  # true / false。/version 相当の軽量確認（VersionApi#get_code）
+KubeRails.connected?  # 成功時は true。失敗は KubeRails::Unavailable / ApiError を raise
+                      # /version 相当の軽量確認（VersionApi#get_code）
 ```
 
-失敗時は例外を raise（`rescue` で扱う）。`KubeRails::Client.build` は lazy で
-初回 API 呼び出し時に実際の接続が行われます。
+`false` を返す経路はありません — 接続不能は例外として上がります（`rescue` で扱う）。
+`KubeRails::Client.build` は lazy で初回 API 呼び出し時に実際の接続が行われます。
 
 ## 例外体系（K3）
 
@@ -117,8 +118,20 @@ bundle install
 bundle exec rake   # rspec + rubocop
 ```
 
-テストは**クラスタ不要**です。`config.api_client` に transport のスタブ
-（`get/list/create/patch` を実装する素のオブジェクト）を注入して行います（§9）。
+テストは**クラスタ不要**です。`config.api_client` に transport のスタブを
+注入して行います（§9）。注入先は内部で `StringKeyedAdapter` に包まれるため、
+スタブは kruby の `CustomObjectsApi` と同型の 4 メソッドを実装します:
+
+```ruby
+class StubTransport
+  def list_namespaced_custom_object(group, version, namespace, plural) = { items: [] }
+  def get_namespaced_custom_object(group, version, namespace, plural, name) = {}
+  def create_namespaced_custom_object(group, version, namespace, plural, body) = {}
+  def patch_namespaced_custom_object(group, version, namespace, plural, name, body) = {}
+end
+
+KubeRails.configure { |c| c.api_client = StubTransport.new }
+```
 
 ## 設計メモ: kruby 1.36 の K1（トークンキー不一致）
 
