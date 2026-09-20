@@ -8,3 +8,19 @@ AllCops:
 # Rails convention: double-quoted strings (matches design doc examples / immerse).
 Style/StringLiterals:
   EnforcedStyle: double_quotes
+
+# Test files are exempt from naming/metrics style cops (full policy lands in M3).
+Naming/MethodParameterName:
+  Exclude:
+    - "spec/**/*"
+Metrics/BlockLength:
+  Exclude:
+    - "spec/**/*"
+
+# The internal transport (Client#StringKeyedAdapter) and kruby's CustomObjectsApi
+# use a fixed (group, version, namespace, plural, ...) signature — the patch
+# variant legitimately carries 6 args. Exempt that method pair from the 5-arg rule.
+Metrics/ParameterLists:
+  Exclude:
+    - "lib/kuberails/client.rb"
+    - "spec/client_spec.rb"

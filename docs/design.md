@@ -1,7 +1,7 @@
 # kuberails 設計書
 
 - 文書番号: KBR-DESIGN-001
-- 版: 0.1.1（案）
+- 版: 0.1.2（案）
 - 日付: 2026-09-15
 - 対象リポジトリ: kuberails（本設計の実装先）
 - 参照元: ice-juice-immerse `app/services/k8s_service.rb`（経験の元になった実装）
@@ -152,8 +152,9 @@ end
 
 ```ruby
 KubeRails::Client.build   # → Kubernetes::CustomObjectsApi（lazy。初回呼び出し時に接続）
-KubeRails.connected?      # → true/false（HEAD /version 相当の軽量確認。v0.1 は
-                          #   エラー変換後の「get が成功したか」のみ実装してよい）
+KubeRails.connected?      # → true/false（/version 相当の軽量確認。v0.1 は
+                          #   kruby 1.36.x の VersionApi#get_code（GET /version/）1 回を
+                          #   例外変換後に行い、成功したら true。失敗は例外を raise）
 ```
 
 `Client.build` が内部で行うこと（immerse `K8sService.custom_objects_api` の中身を移設）:
@@ -161,8 +162,8 @@ KubeRails.connected?      # → true/false（HEAD /version 相当の軽量確認
 0. `config.api_client` があれば（テスト注入、§5.1）それを直接返し、以降の接続解決をスキップ
 1. `config.connection` があればそれ、なければ `Kubernetes::Configuration.default_config`
 2. **K1 橋渡し**: `api_key['authorization']` が `api_key['BearerToken']` に書かれていなければ複製
-3. `Kubernetes::ApiClient` → `Kubernetes::CustomObjectsApi` を生成し、**文字列キー化**（K2）を API レスポンス後に行う。ActiveSupport 存在時は `deep_stringify_keys`、なければ gem 内部の純 Ruby 再帰変換（`KubeRails::Normalizer`）を使う
-4. **接続レベルの失敗**（DNS 失敗 / タイムアウト / 接続拒否等、kruby 転送層例外の明示的な allowlist — §5.4 参照）は `KubeRails::Unavailable` に変換して `raise`（リトライはしない）。認可失敗（401/403）は §5.4 により `KubeRails::ApiError`
+3. `Kubernetes::ApiClient` → `Kubernetes::CustomObjectsApi` を生成し、**文字列キー化**（K2）を API レスポンス後に行う。ActiveSupport 非依存の gem 内部の純 Ruby 再帰変換（`KubeRails::Normalizer`）を使う（v0.1.1 以降: 常に Normalizer。`deep_stringify_keys` 経路は廃止）
+4. **接続レベルの失敗**（DNS 失敗 / タイムアウト / 接続拒否等）は `KubeRails::Unavailable` に変換して `raise`（リトライはしない）。**kruby 1.36.x ではこれらの転送失敗は HTTP ステータスが無いため `Kubernetes::ApiError`（`code == 0`）として surfacing する**（§5.4 の変換表参照）。認可失敗（401/403）は §5.4 により `KubeRails::ApiError`
 
 ### 5.3 CRD 宣言
 
@@ -210,7 +211,7 @@ KubeRails::Error < StandardError
 
 | kruby 側 | → gem 側 |
 |---|---|
-| kruby 転送層例外（DNS 失敗 / タイムアウト / 接続拒否等。`client.rb` での明示 allowlist） | `Unavailable` |
+| kruby 転送層例外（DNS 失敗 / タイムアウト / 接続拒否等。kruby 1.36.x では **`ApiError`（`code == 0`）** として surfacing） | `Unavailable` |
 | その他の `StandardError`（プログラミング/設定ミス、例: `NoMethodError`） | そのまま伝播（変換せず隠さない） |
 | `Kubernetes::ApiError` code 404 | `NotFound` |
 | `Kubernetes::ApiError` その他 | `ApiError`（code / response body を保持） |
@@ -335,3 +336,4 @@ PR の差分を最小化）。
 |---|---|---|---|
 | 0.1 | 2026-09-15 | 初版（案）。immerse K8sService の知見 K1–K5 を基に作成 | 未承認 |
 | 0.1.1 | 2026-09-18 | PR #1 レビュー対応: 文字列キー化の純 Ruby 経路（ActiveSupport 非依存）、401/403→ApiError 統一、`throw`→`raise`、core v1 を built-in 扱いに修正、`~> 1.36.0` に統一、テスト注入の `api_client` 追加、例外ツリーに `ReadOnlyError`/`RedeclarationError` 追記、初期化子例を汎用化 | レビュー反映済み |
+| 0.1.2 | 2026-09-18 | M1 実装にあたって kruby 1.36.2.1 を実機確認した差分を反映: `connected?` の endpoint を `VersionApi#get_code`（GET /version/）に修正、転送失敗（DNS/timeout/接続拒否）が `ApiError(code == 0)` として surfacing することを §5.2/§5.4 に明記、文字列キー化を常に `Normalizer`（`deep_stringify_keys` 経路廃止）に統一 | 実装反映済み |
