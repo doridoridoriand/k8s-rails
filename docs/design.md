@@ -1,7 +1,7 @@
 # kuberails 設計書
 
 - 文書番号: KBR-DESIGN-001
-- 版: 0.1.3（案）
+- 版: 0.1.4（案）
 - 日付: 2026-09-15
 - 対象リポジトリ: kuberails（本設計の実装先）
 - 参照元: ice-juice-immerse `app/services/k8s_service.rb`（経験の元になった実装）
@@ -334,8 +334,16 @@ PR の差分を最小化）。
 - **gem 名 / リポジトリ名: `kuberails`**（RubyGems で空きを確認済み 2026-09-15。
   `kube-rails` は 2015 年の旧 gem が取得済みであり使用不可）
 - GitHub: `doridoridoriand/kuberails`（org `kuberails` は他者が使用済み。個人アカウント配下）
-- 公開は v0.1 完成後、`gem push`（RubyGems）。`README` に「kruby pin」「対応 k8s バージョン」
-  「K1 橋渡しの背景」を明記する（検索でヒットする重要な注意点のため）
+- 公開は v0.1 完成後、**タグ基準の GitHub Actions 公開**（`.github/workflows/publish.yml`）。
+  - タグ `v*` push で `gem build` + `gem push`（RubyGems）を自動実行。
+    タグ名と gemspec の `VERSION` の不一致は CI で検出して失敗させる
+  - 公開権限はリポジトリ Secrets `GEM_HOST_API_KEY`（RubyGems API key）。
+    初回は RubyGems アカウント作成 + `gem owner kuberails <username>` を owner が実施
+  - テスト CI（`.github/workflows/test.yml`）は push / PR 時に rspec + rubocop を実行。
+    テストはクラスタ不要（§9・スタブ注入）のため v0.1 は runner 上のユニットのみ。
+    kind / 実クラスタ E2E の CI 化は v0.2 対象（§9・§10）
+- `README` に「kruby pin」「対応 k8s バージョン（実測 v1.33.x で検証済み）」「K1 橋渡しの背景」
+  を明記する（検索でヒットする重要な注意点のため）
 
 ## 14. 承認・変更履歴
 
@@ -345,3 +353,4 @@ PR の差分を最小化）。
 | 0.1.1 | 2026-09-18 | PR #1 レビュー対応: 文字列キー化の純 Ruby 経路（ActiveSupport 非依存）、401/403→ApiError 統一、`throw`→`raise`、core v1 を built-in 扱いに修正、`~> 1.36.0` に統一、テスト注入の `api_client` 追加、例外ツリーに `ReadOnlyError`/`RedeclarationError` 追記、初期化子例を汎用化 | レビュー反映済み |
 | 0.1.2 | 2026-09-18 | M1 実装にあたって kruby 1.36.2.1 を実機確認した差分を反映: `connected?` の endpoint を `VersionApi#get_code`（GET /version/）に修正、転送失敗（DNS/timeout/接続拒否）が `ApiError(code == 0)` として surfacing することを §5.2/§5.4 に明記、文字列キー化を常に `Normalizer`（`deep_stringify_keys` 経路廃止）に統一 | 実装反映済み |
 | 0.1.3 | 2026-09-20 | M3 実装に伴う §8 の軽微明確化: notification の `operation` は symbol・`status` は文字列であること、例外は発火後そのまま raise（swallow しない）こと、no-op 時（AS 無 / instrumentation: false）もブロック値がそのまま返ること。加えて `connected?` の戻り値記述を実装に合わせ修正（false を返す経路なし・失敗は raise）、テストスタブのメソッド名を kruby `CustomObjectsApi` 形式（`*_namespaced_custom_object`）に修正 | 実装反映済み |
+| 0.1.4 | 2026-09-21 | リリース準備（§13）: 公開導線を手動 `gem push` から**タグ基準の GitHub Actions**（`test.yml` / `publish.yml`）に更新、README に検証済み k8s サーババージョン（v1.33.x / microk8s v1.33.13）を追記、CHANGELOG.md を同梱、gemspec に `source_code_uri` / `changelog_uri` / `allowed_push_host` メタ情報を追加 | 実装反映済み |

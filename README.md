@@ -5,6 +5,10 @@ gem として提供する。（設計書: [docs/design.md](docs/design.md), KBR-
 
 - Ruby: `>= 3.2`（開発は 3.3.8、`.ruby-version` で pin）
 - kruby: `~> 1.36.0`（公式 Kubernetes OpenAPI クライアント）
+- Kubernetes サーバ: **v1.33.x で検証済み**（実クラスタ microk8s v1.33.13、2026-09-21）。
+  kruby 1.36.x は k8s 1.36 系のクライアントであり、1.33 系のサーバとの組合せで
+  動作確認済み。より新しいサーバ（1.36 等）でも同じ API（CustomObjects API v1）
+  を使うため互換性は期待できるが、まだ実機検証はしていない
 - 依存: 実行時 **kruby のみ**。ActiveSupport は計測（§8）にだけ任意で使う（無い環境は no-op）
 
 ```ruby
