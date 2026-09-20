@@ -16,7 +16,12 @@ Gem::Specification.new do |spec|
   spec.license = "MIT"
   spec.required_ruby_version = ">= 3.2"
 
-  spec.files = Dir["lib/**/*.rb", "README.md", "LICENSE", "docs/design.md"]
+  # RubyGems.org ページに source / changelog リンクを表示させるためのメタ情報。
+  spec.metadata["source_code_uri"] = "https://github.com/doridoridoriand/kuberails"
+  spec.metadata["changelog_uri"] = "https://github.com/doridoridoriand/kuberails/blob/main/CHANGELOG.md"
+  spec.metadata["allowed_push_host"] = "https://rubygems.org"
+
+  spec.files = Dir["lib/**/*.rb", "README.md", "LICENSE", "CHANGELOG.md", "docs/design.md"]
   spec.require_paths = ["lib"]
 
   # kruby (official Kubernetes OpenAPI client). Pinned to the 1.36.x line;

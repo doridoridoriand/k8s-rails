@@ -1,0 +1,29 @@
+# テスト: push / PR 時に rspec + rubocop を実行。
+#
+# 本 gem のテストはクラスタ不要（§9・transport スタブ注入）なので
+# runner は ubuntu-latest + Ruby のみ。kind / 実クラスタ E2E は
+# v0.2 の CI 化対象（設計書 §9・§10）で、v0.1 では手動検証（§12）。
+name: Test
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  pull_request:
+
+concurrency:
+  group: ci-test-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  rspec-rubocop:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Ruby
+        uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: ".ruby-version"
+          bundler-cache: true
+      - name: Run rspec + rubocop
+        run: bundle exec rake
