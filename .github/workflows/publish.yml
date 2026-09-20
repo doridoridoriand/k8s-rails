@@ -35,14 +35,15 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  # 前提テスト: 宣言されたサポート Ruby（下限 3.3.0 = kruby 1.36.x の
-  # required_ruby_version）の全バージョンで rake を通してからでないと公開しない。
+  # 前提テスト: 宣言されたサポート Ruby の全 minor（3.3 / 3.4）の rake を
+  # 通してからでないと公開しない。matrix 構成は test.yml と同一
+  # （3.3.0 = 下限 / 3.3.8 = 開発 / 3.4.10 = 最新 stable）。
   verify:
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
-        ruby: ["3.3.8", "3.3.0"]
+        ruby: ["3.3.0", "3.3.8", "3.4.10"]
     steps:
       - uses: actions/checkout@v4
       - name: Set up Ruby

@@ -14,7 +14,7 @@
   （実クラスタ microk8s v1.33.13、kuberails#6 / consumer app#63）
 - 応答は常に文字列キー（K2）・純 Ruby `Normalizer`（ActiveSupport 非依存）
 - 対応 Ruby: `>= 3.3`（kruby 1.36.x が `>= 3.3` を要求するため）。
-  CI（GitHub Actions）で 3.3.8 / 3.3.x を matrix 検証
+  CI（GitHub Actions）で 3.3.0 / 3.3.8 / 3.4.10 の matrix 検証
 - 対応 Kubernetes サーバ: v1.33.x で実クラスタ検証済み（README 参照）
 - 公開導線: GitHub Actions（push / PR で rspec + rubocop、タグ `v*` で
   `gem build` + `gem push`）

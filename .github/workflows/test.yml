@@ -21,10 +21,13 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # 宣言された最低サポートバージョン（3.3.0 = kruby 1.36.x の
-        # required_ruby_version、実測 2026-09-21）と開発バージョン（.ruby-version）。
-        # 下限の 3.3.0 を必ず検証する（gemspec の `>= 3.3` は 3.3.0 を含むため）。
-        ruby: ["3.3.8", "3.3.0"]
+        # 宣言された Ruby minor（3.3 / 3.4、gemspec `>= 3.3`）をそれぞれ
+        # 検証する。3.3.0 = 宣言下限（kruby 1.36.x の required_ruby_version、
+        # 実測 2026-09-21）、3.3.8 = 開発バージョン（.ruby-version）、
+        # 3.4.10 = 現在の最新 stable（ruby-lang.org 実測 2026-09-21）。
+        # 新しい minor が stable になったら matrix に追加すること
+        # （`>= 3.3` の宣言は追加 minor を自動的に含むため）。
+        ruby: ["3.3.0", "3.3.8", "3.4.10"]
     steps:
       - uses: actions/checkout@v4
       - name: Set up Ruby
