@@ -39,6 +39,15 @@ RSpec.describe "KubeRails.crd" do
     expect(KubeRails::CRD.registered).to eq("Workflow" => wf)
   end
 
+  it "rejects a non-boolean readonly (mutations require an explicit false, K4)" do
+    expect do
+      KubeRails.crd(group: "g", version: "v1", plural: "p", kind: "NilRO", readonly: nil)
+    end.to raise_error(ArgumentError, /readonly must be true or false/)
+
+    # nil must NOT have silently enabled writes (the pre-fix fail-open).
+    expect(KubeRails::CRD.registered).not_to have_key("NilRO")
+  end
+
   it "raises RedeclarationError on a second declaration of the same kind" do
     KubeRails.crd(group: "g", version: "v1", plural: "p", kind: "Widget")
 
