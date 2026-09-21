@@ -19,7 +19,7 @@ Gem::Specification.new do |spec|
   # 上限 `< 4.0` は「宣言した minor を必ず CI で検証する」方針のため（レビュー対応・
   # 2026-09-21）: 2026-09-21 時点で Ruby 3.5 は preview（ruby/ruby タグ
   # v3_5_0_preview1）、4.0 は stable（v4.0.7）。未検証の 4.x を宣言範囲から
-  # 除外し、4.0 対応検証は v0.2 以降で行う。
+  # 除外し、4.0 対応検証は v0.3 で行う（設計書 §10）。
   spec.required_ruby_version = [">= 3.3", "< 4.0"]
 
   # RubyGems.org ページに source / changelog リンクを表示させるためのメタ情報。
