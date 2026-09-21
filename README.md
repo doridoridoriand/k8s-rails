@@ -1,6 +1,5 @@
 # kuberails
-
-> A Kubernetes API / CRD convention layer for Rails applications.
+A Kubernetes API / CRD convention layer for Rails applications.
 
 `kuberails` provides the **connection, CRD access, and error-handling convention
 layer** for Rails applications that talk to the Kubernetes API.
