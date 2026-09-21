@@ -87,6 +87,28 @@ RSpec.describe K8sRails::Client do
       out = K8sRails.client.patch("g", "v", "n", "workflows", "wf-1", [{ op: "add", path: "/a", value: 1 }])
       expect(out).to eq("metadata" => { "name" => "wf-1" }, "patched" => true)
     end
+
+    # Cluster-scoped endpoints (#17): same normalization contract, kruby
+    # *_cluster_custom_object signatures (no namespace argument).
+    it "deep-stringifies list_cluster responses" do
+      out = K8sRails.client.list_cluster("g", "v", "clusterissuers")
+      expect(out).to eq("items" => [{ "name" => "a" }], "kind" => "List")
+    end
+
+    it "deep-stringifies get_cluster responses" do
+      out = K8sRails.client.get_cluster("g", "v", "clusterissuers", "ci-1")
+      expect(out).to eq("metadata" => { "name" => "ci-1" })
+    end
+
+    it "deep-stringifies create_cluster responses" do
+      out = K8sRails.client.create_cluster("g", "v", "clusterissuers", { metadata: { generateName: "x-" } })
+      expect(out).to eq("metadata" => { "name" => "created", "generateName" => "x-" })
+    end
+
+    it "deep-stringifies patch_cluster responses" do
+      out = K8sRails.client.patch_cluster("g", "v", "clusterissuers", "ci-1", [{ op: "add", path: "/a", value: 1 }])
+      expect(out).to eq("metadata" => { "name" => "ci-1" }, "patched" => true)
+    end
   end
 
   # --- K3: exception conversion --------------------------------------------
@@ -121,6 +143,12 @@ RSpec.describe K8sRails::Client do
       K8sRails.config.api_client = Object.new # responds to nothing
       expect { K8sRails.client.list("g", "v", "n", "p") }
         .to raise_error(NoMethodError)
+    end
+
+    it "converts the same table for cluster-scoped operations (#17)" do
+      with_raising_transport(Kubernetes::ApiError.new(code: 404, response_body: nil))
+      expect { K8sRails.client.get_cluster("g", "v", "p", "missing") }
+        .to raise_error(K8sRails::NotFound)
     end
   end
 
@@ -159,6 +187,24 @@ RSpec.describe K8sRails::Client do
       expect { K8sRails.connected? }.to raise_error(K8sRails::Unavailable)
       expect(kconfig.api_key["BearerToken"]).to eq("Bearer probe-token")
     end
+
+    # #18: under transport injection the injected transport IS the connection
+    # surface, so connected? returns true without probing a real endpoint.
+    it "returns true without network I/O when api_client is injected (#18)" do
+      K8sRails.config.api_client = FakeTransport.new
+
+      expect(K8sRails.connected?).to be(true)
+    end
+
+    it "still probes the real endpoint when no transport is injected (#18)" do
+      kconfig = Kubernetes::Configuration.new
+      kconfig.host = "127.0.0.1:1"
+      kconfig.scheme = "http"
+      kconfig.ssl_ca_cert = nil
+      K8sRails.config.connection = kconfig
+
+      expect { K8sRails.connected? }.to raise_error(K8sRails::Unavailable)
+    end
   end
 end
 
@@ -190,6 +236,27 @@ class FakeTransport
     @calls << :patch
     { metadata: { name: name }, patched: true }
   end
+
+  # Cluster-scoped variants (kruby *_cluster_custom_object: no namespace arg).
+  def list_cluster_custom_object(_g, _v, _p)
+    @calls << :list_cluster
+    { items: [{ name: "a" }], kind: "List" }
+  end
+
+  def get_cluster_custom_object(_g, _v, _p, name)
+    @calls << :get_cluster
+    { metadata: { name: name } }
+  end
+
+  def create_cluster_custom_object(_g, _v, _p, body)
+    @calls << :create_cluster
+    { metadata: (body["metadata"] || body[:metadata] || {}).merge(name: "created") }
+  end
+
+  def patch_cluster_custom_object(_g, _v, _p, name, _body)
+    @calls << :patch_cluster
+    { metadata: { name: name }, patched: true }
+  end
 end
 
 # A transport whose every operation raises a fixed kruby error, to exercise
@@ -212,6 +279,22 @@ class RaisingTransport
   end
 
   def patch_namespaced_custom_object(*)
+    raise @error
+  end
+
+  def list_cluster_custom_object(*)
+    raise @error
+  end
+
+  def get_cluster_custom_object(*)
+    raise @error
+  end
+
+  def create_cluster_custom_object(*)
+    raise @error
+  end
+
+  def patch_cluster_custom_object(*)
     raise @error
   end
 end

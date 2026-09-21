@@ -23,14 +23,22 @@ module K8sRails
 
     # Configure the gem. Runs once — a second call warns and is ignored
     # (design §5.1). Yields the Configuration object.
+    #
+    # Atomicity contract: "runs once" holds only when the block returns
+    # normally. If the block exits abnormally (any exception — including
+    # LoadError/ScriptError — throw, non-local return, ...), the flag is
+    # reset, so a later `configure` call re-runs normally. However,
+    # attribute writes made before the exit REMAIN on the shared
+    # Configuration — a failed block may leave a partially applied state;
+    # the re-run block is responsible for setting every attribute it
+    # depends on (documented in design §5.1).
     def configure
       if @configured
         warn "[K8sRails] K8sRails.configure called more than once; ignoring the second call."
         return config
       end
 
-      @configured = true
-      yield config
+      run_configure_block { yield config }
       config
     end
 
@@ -57,9 +65,10 @@ module K8sRails
     # Declare a CRD and return its Resource class (design §5.3, K5).
     #   Workflow = K8sRails.crd(group: "argoproj.io", version: "v1alpha1",
     #                            plural: "workflows", kind: "Workflow")
+    # Cluster-scoped CRDs: pass scope: :cluster (and no namespace:).
     # Re-declaring the same kind raises K8sRails::RedeclarationError.
-    def crd(group:, version:, plural:, kind:, namespace: nil, readonly: true)
-      CRD.declare(group:, version:, plural:, kind:, namespace:, readonly:)
+    def crd(group:, version:, plural:, kind:, namespace: nil, readonly: true, scope: :namespaced)
+      CRD.declare(group:, version:, plural:, kind:, namespace:, readonly:, scope:)
     end
 
     # Design §8: run an API call inside a `k8s-rails.request` notification.
@@ -105,6 +114,25 @@ module K8sRails
     # (spec helper may stub this to exercise the no-op path deterministically).
     def instrumentation_enabled?
       config.instrumentation && defined?(ActiveSupport::Notifications)
+    end
+
+    private
+
+    # Runs the configure block with the configured-once contract (§5.1):
+    # the flag is set only if the block returns normally. ANY abnormal exit
+    # (StandardError, LoadError/ScriptError, throw, non-local return, other
+    # Exception subclasses) resets it so a later `configure` re-runs — but
+    # attribute writes made before the exit remain on the shared
+    # Configuration.
+    def run_configure_block
+      @configured = true
+      ok = false
+      begin
+        yield
+        ok = true
+      ensure
+        @configured = false unless ok
+      end
     end
   end
 
