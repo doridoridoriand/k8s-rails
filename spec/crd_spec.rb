@@ -70,6 +70,38 @@ RSpec.describe "K8sRails.crd" do
     expect(K8sRails::CRD.registered).to be_empty
   end
 
+  it "accepts scope: :cluster and binds it (cluster-scoped CRDs, #17)" do
+    ci = K8sRails.crd(
+      group: "cert-manager.io", version: "v1", plural: "clusterissuers",
+      kind: "ClusterIssuer", scope: :cluster
+    )
+
+    expect(ci.cluster_scoped?).to be(true)
+    expect(ci.declared_namespace).to be_nil
+  end
+
+  it "defaults to scope: :namespaced" do
+    wf = K8sRails.crd(group: "g", version: "v1", plural: "workflows", kind: "Workflow")
+    expect(wf.cluster_scoped?).to be(false)
+  end
+
+  it "rejects an unknown scope (fail fast)" do
+    expect do
+      K8sRails.crd(group: "g", version: "v1", plural: "p", kind: "BadScope", scope: :global)
+    end.to raise_error(ArgumentError, /scope must be :namespaced or :cluster/)
+
+    expect(K8sRails::CRD.registered).not_to have_key("BadScope")
+  end
+
+  it "rejects namespace: combined with scope: :cluster (#17)" do
+    expect do
+      K8sRails.crd(group: "g", version: "v1", plural: "clusterp", kind: "BadCombo",
+                   scope: :cluster, namespace: "team-a")
+    end.to raise_error(ArgumentError, /namespace cannot be combined with scope: :cluster/)
+
+    expect(K8sRails::CRD.registered).not_to have_key("BadCombo")
+  end
+
   it "does not load kruby at declaration time (§7 lazy contract)" do
     code = "require \"k8s-rails\"; " \
            "K8sRails.crd(group: \"g\", version: \"v1\", plural: \"p\", kind: \"K\"); " \

@@ -10,13 +10,13 @@ module K8sRails
   # touches kruby itself (§7).
   #
   #   Workflow = K8sRails.crd(group: "argoproj.io", version: "v1alpha1",
-  #                            plural: "workflows", kind: "Workflow")
-  #   Workflow.list
-  #   Workflow.find("wf-1")
+  #                           plural: "workflows", kind: "Workflow")
   class Resource
     # Bind declared coordinates to a fresh anonymous subclass. `namespace`
     # may be nil — resolved from `K8sRails.config.namespace` at call time.
-    def self.declare(group:, version:, plural:, kind:, namespace: nil, readonly: true)
+    # `scope` is :namespaced (default) or :cluster (design §5.3); cluster
+    # declarations must not set `namespace`.
+    def self.declare(group:, version:, plural:, kind:, namespace: nil, readonly: true, scope: :namespaced)
       Class.new(self) do
         define_singleton_method(:group_name) { group }
         define_singleton_method(:version_name) { version }
@@ -24,13 +24,16 @@ module K8sRails
         define_singleton_method(:kind_name) { kind }
         define_singleton_method(:declared_namespace) { namespace }
         define_singleton_method(:readonly?) { readonly }
+        define_singleton_method(:cluster_scoped?) { scope == :cluster }
       end
     end
 
     class << self
-      # All objects in the namespace. Returns an array of string-keyed Hashes
-      # (design §5.3: `[{ "name" => "...", ... }]`).
+      # All objects in the namespace (namespaced declarations only —
+      # cluster-scoped declarations raise ArgumentError). Returns an array
+      # of string-keyed Hashes (design §5.3: `[{"name" => "...", ...}]`).
       def list(namespace: resolved_namespace)
+        assert_namespaced
         K8sRails.instrument(:list, instrument_meta(namespace)) do
           transport.list(group_name, version_name, namespace, plural_name)["items"] || []
         end
@@ -38,6 +41,7 @@ module K8sRails
 
       # One object by name. Raises K8sRails::NotFound when absent.
       def find(name, namespace: resolved_namespace)
+        assert_namespaced
         K8sRails.instrument(:find, instrument_meta(namespace)) do
           transport.get(group_name, version_name, namespace, plural_name, name)
         end
@@ -53,6 +57,7 @@ module K8sRails
       # Create from a CRD body hash. `readonly: true` declarations raise
       # K8sRails::ReadOnlyError (K4).
       def create(attributes, namespace: resolved_namespace)
+        assert_namespaced
         assert_writable
         K8sRails.instrument(:create, instrument_meta(namespace)) do
           transport.create(group_name, version_name, namespace, plural_name, attributes)
@@ -61,9 +66,54 @@ module K8sRails
 
       # JSON Patch a named object. Same readonly restriction as `create`.
       def patch(name, operations, namespace: resolved_namespace)
+        assert_namespaced
         assert_writable
         K8sRails.instrument(:patch, instrument_meta(namespace)) do
           transport.patch(group_name, version_name, namespace, plural_name, name, operations)
+        end
+      end
+
+      # Cluster-scoped variants (design §5.3). Available on EVERY declared
+      # class; a `scope: :namespaced` declaration raises ArgumentError (its
+      # CRD is namespaced, so cluster endpoints 404 anyway).
+      # All objects cluster-wide. Returns an array of string-keyed Hashes.
+      def list_cluster
+        assert_cluster_scoped
+        K8sRails.instrument(:list, instrument_meta(nil)) do
+          transport.list_cluster(group_name, version_name, plural_name)["items"] || []
+        end
+      end
+
+      # One cluster-scoped object by name. Raises K8sRails::NotFound when absent.
+      def find_cluster(name)
+        assert_cluster_scoped
+        K8sRails.instrument(:find, instrument_meta(nil)) do
+          transport.get_cluster(group_name, version_name, plural_name, name)
+        end
+      end
+
+      # Like `find_cluster`, but returns nil instead of raising on NotFound.
+      def find_or_nil_cluster(name)
+        find_cluster(name)
+      rescue NotFound
+        nil
+      end
+
+      # Create a cluster-scoped object. Same readonly restriction as `create`.
+      def create_cluster(attributes)
+        assert_cluster_scoped
+        assert_writable
+        K8sRails.instrument(:create, instrument_meta(nil)) do
+          transport.create_cluster(group_name, version_name, plural_name, attributes)
+        end
+      end
+
+      # JSON Patch a cluster-scoped object. Same readonly restriction.
+      def patch_cluster(name, operations)
+        assert_cluster_scoped
+        assert_writable
+        K8sRails.instrument(:patch, instrument_meta(nil)) do
+          transport.patch_cluster(group_name, version_name, plural_name, name, operations)
         end
       end
 
@@ -80,14 +130,29 @@ module K8sRails
         declared_namespace || K8sRails.config.namespace
       end
 
-      def transport
-        K8sRails.client
-      end
+      # Endless method: keeps the class under the ClassLength budget while
+      # delegating to the shared transport (design §5.2).
+      def transport = K8sRails.client
 
       def assert_writable
         return unless readonly?
 
         raise ReadOnlyError, "#{kind_name} is declared readonly — create/patch are disabled (K4)"
+      end
+
+      def assert_cluster_scoped
+        return if cluster_scoped?
+
+        raise ArgumentError,
+              "#{kind_name} is namespaced — *_cluster methods require a scope: :cluster declaration"
+      end
+
+      def assert_namespaced
+        return unless cluster_scoped?
+
+        raise ArgumentError,
+              "#{kind_name} is declared scope: :cluster — use the *_cluster methods " \
+              "(there is no namespace endpoint for a cluster-scoped CRD)"
       end
     end
   end

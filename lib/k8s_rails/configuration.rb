@@ -13,7 +13,9 @@ module K8sRails
     attr_accessor :namespace
 
     # Kubernetes::Configuration インスタンス。省略時は default_config の自動
-    # 検出（in-cluster → KUBECONFIG）。認証を上書きする場合に指定する。
+    # 検出（kruby 1.36.x の実装順: KUBECONFIG → ~/.kube/config → in-cluster。
+    # kruby 更新時にこの順序が変更されていないか loader を再確認すること）。
+    # 認証を上書きする場合に指定する。
     attr_accessor :connection
 
     # テスト専用（§5.1）。CustomObjectsApi と同型の 4 メソッド

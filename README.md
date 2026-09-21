@@ -74,12 +74,19 @@ K8sRails.configure do |config|
 end
 ```
 
-- `configure` is effective **only once**. A second call prints a warning and is
-  ignored (use `K8sRails.reset!` to reset the configuration, the cached
-  transport, and declared CRDs — primarily for tests).
+- `configure` is effective **only once** — but only when the block returns
+  normally. If the block raises, the "configured" flag is reset, so a later
+  `configure` runs normally. Note that attribute writes made before the raise
+  **remain** on the shared configuration (a partially applied state is
+  possible); a re-run block should set every attribute it depends on.
+  A second call on an already-configured gem prints a warning and is ignored
+  (use `K8sRails.reset!` to reset the configuration, the cached transport, and
+  declared CRDs — primarily for tests).
 - Connection resolution order: `config.api_client` (test injection) →
   `config.connection` → `Kubernetes::Configuration.default_config`
-  (automatic in-cluster → KUBECONFIG detection).
+  (automatic detection in kruby 1.36.x: `KUBECONFIG` → `~/.kube/config` →
+  in-cluster. Note in-cluster is tried **last**, after the file-based
+  sources — re-verify `kruby`'s loader when upgrading kruby).
 
 ## CRD declaration and access
 
@@ -96,6 +103,35 @@ internally in pure Ruby (no ActiveSupport dependency). Every method accepts a
 `ArgumentError`). Writes are enabled **only** by `readonly: false`, so a
 missing flag can never fail open.
 
+### Cluster-scoped CRDs
+
+Both namespaced and cluster-scoped CRDs are supported. Declare a
+cluster-scoped CRD (ClusterIssuer, ClusterWorkflowTemplate, ...) with
+`scope: :cluster` and **without** `namespace:` (combining the two raises
+`ArgumentError`):
+
+```ruby
+ClusterIssuer = K8sRails.crd(
+  group:  "cert-manager.io",
+  version: "v1",
+  plural: "clusterissuers",
+  kind:   "ClusterIssuer",
+  scope:  :cluster,          # cluster-scoped endpoints (no namespace)
+)
+
+ClusterIssuer.list_cluster               # all objects cluster-wide
+ClusterIssuer.find_cluster("letsencrypt")
+ClusterIssuer.find_or_nil_cluster("x")
+ClusterIssuer.create_cluster({ ... })    # readonly: false only
+ClusterIssuer.patch_cluster("letsencrypt", [{ ... }])  # readonly: false only
+```
+
+On a `scope: :namespaced` declaration (the default) the `*_cluster` methods
+raise `ArgumentError` — the CRD is namespaced, so the cluster endpoints would
+404 anyway. For a cluster-scoped declaration, use the `*_cluster` methods
+(the plain `list`/`find`/... would call the namespaced endpoints and 404;
+their `namespace:` argument is ignored by the `*_cluster` methods).
+
 ## Connectivity check
 
 ```ruby
@@ -106,6 +142,11 @@ K8sRails.connected?  # true on success; raises K8sRails::Unavailable / ApiError 
 It never returns `false` — a connection failure surfaces as an exception
 (handle it with `rescue`). The actual API connection is established lazily on
 the first API call.
+
+When a test transport is injected via `config.api_client`, `connected?`
+returns `true` without any network I/O — the injected transport **is** the
+connection surface, so probing a real endpoint would contradict the Resource
+operations that the same injection serves.
 
 ## Exception hierarchy
 
@@ -154,7 +195,9 @@ end
 
 The test suite needs **no cluster**. Tests inject a transport stub via
 `config.api_client`. The stub is wrapped internally by an adapter, so it just
-implements the same four methods as kruby's `CustomObjectsApi`:
+implements the same methods as kruby's `CustomObjectsApi` — the four
+`*_namespaced_custom_object` methods, plus (for cluster-scoped declarations)
+the four `*_cluster_custom_object` methods:
 
 ```ruby
 class StubTransport
@@ -162,10 +205,18 @@ class StubTransport
   def get_namespaced_custom_object(group, version, namespace, plural, name) = {}
   def create_namespaced_custom_object(group, version, namespace, plural, body) = {}
   def patch_namespaced_custom_object(group, version, namespace, plural, name, body) = {}
+
+  def list_cluster_custom_object(group, version, plural) = { items: [] }
+  def get_cluster_custom_object(group, version, plural, name) = {}
+  def create_cluster_custom_object(group, version, plural, body) = {}
+  def patch_cluster_custom_object(group, version, plural, name, body) = {}
 end
 
 K8sRails.configure { |c| c.api_client = StubTransport.new }
 ```
+
+With a transport injected, `K8sRails.connected?` returns `true` without
+network I/O (see [Connectivity check](#connectivity-check)).
 
 ## Development
 

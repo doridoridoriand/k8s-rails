@@ -14,6 +14,11 @@ module K8sRails
   #   api.get(group, version, namespace, plural, name)
   #   api.create(group, version, namespace, plural, body)
   #   api.patch(group, version, namespace, plural, name, body)
+  #   # cluster-scoped (namespace argument omitted, design §5.3)
+  #   api.list_cluster(group, version, plural)
+  #   api.get_cluster(group, version, plural, name)
+  #   api.create_cluster(group, version, plural, body)
+  #   api.patch_cluster(group, version, plural, name, body)
   #
   # Connection is LAZY: `build` does no network I/O — it only resolves a
   # `Kubernetes::Configuration` and builds an in-memory `CustomObjectsApi`.
@@ -44,7 +49,15 @@ module K8sRails
       # Lightweight connectivity probe (design §5.2). Performs one lightweight
       # `/version` call via VersionApi and returns true on success. Raises
       # K8sRails::Unavailable / ApiError on failure (the app may rescue).
+      #
+      # Injection contract: when `config.api_client` is set (test injection),
+      # the injected transport IS the connection surface — there is no real
+      # network to probe, so this returns true without I/O. This keeps
+      # `connected?` consistent with Resource operations under injection
+      # (design §5.2).
       def connected?
+        return true if K8sRails.config.api_client
+
         config = build_configuration
         # The probe also authenticates — apply the K1 bridge or the Authorization
         # header would be empty on clusters where /version requires auth.
@@ -146,6 +159,43 @@ module K8sRails
         handle do
           Normalizer.stringify(
             @transport.patch_namespaced_custom_object(group, version, namespace, plural, name, body)
+          )
+        end
+      end
+
+      # Cluster-scoped variants (design §5.3): the same four operations on
+      # kruby's *_cluster_custom_object endpoints (no namespace in the path).
+      # An injected test double must implement both the *_namespaced_* and
+      # *_cluster_* quadruples.
+
+      def list_cluster(group, version, plural)
+        handle do
+          Normalizer.stringify(
+            @transport.list_cluster_custom_object(group, version, plural)
+          )
+        end
+      end
+
+      def get_cluster(group, version, plural, name)
+        handle do
+          Normalizer.stringify(
+            @transport.get_cluster_custom_object(group, version, plural, name)
+          )
+        end
+      end
+
+      def create_cluster(group, version, plural, body)
+        handle do
+          Normalizer.stringify(
+            @transport.create_cluster_custom_object(group, version, plural, body)
+          )
+        end
+      end
+
+      def patch_cluster(group, version, plural, name, body)
+        handle do
+          Normalizer.stringify(
+            @transport.patch_cluster_custom_object(group, version, plural, name, body)
           )
         end
       end

@@ -12,6 +12,9 @@ module K8sRails
   #     readonly: false,                        # default true
   #   )
   #
+  # Cluster-scoped CRDs (ClusterIssuer, ClusterWorkflowTemplate, ...) use
+  # `scope: :cluster` — `namespace` must be omitted (design §5.3).
+  #
   # `crd` returns a `Resource` subclass with the coordinates bound; the same
   # class is registered under its kind name so a second declaration of the
   # same kind raises K8sRails::RedeclarationError (config-mistake detection).
@@ -30,10 +33,22 @@ module K8sRails
     # kind are explicit — never guessed). `readonly` must be an explicit
     # boolean: mutations are enabled ONLY by `readonly: false` (design §5.3 /
     # K4), so nil/other values fail fast instead of silently allowing writes.
-    def self.declare(group:, version:, plural:, kind:, namespace: nil, readonly: true)
+    # `scope` is :namespaced (default) or :cluster; `namespace` and
+    # `scope: :cluster` are mutually exclusive (a cluster CRD has no
+    # namespace to bind).
+    def self.declare(group:, version:, plural:, kind:, namespace: nil, readonly: true, scope: :namespaced)
       unless [true, false].include?(readonly)
         raise ArgumentError,
               "readonly must be true or false (got #{readonly.inspect}) — mutations require an explicit readonly: false"
+      end
+
+      unless %i[namespaced cluster].include?(scope)
+        raise ArgumentError, "scope must be :namespaced or :cluster (got #{scope.inspect})"
+      end
+
+      if scope == :cluster && !namespace.nil?
+        raise ArgumentError,
+              "namespace cannot be combined with scope: :cluster — cluster-scoped CRDs have no namespace"
       end
 
       if registered.key?(kind)
@@ -46,7 +61,8 @@ module K8sRails
         plural: plural,
         kind: kind,
         namespace: namespace,
-        readonly: readonly
+        readonly: readonly,
+        scope: scope
       )
       registered[kind] = resource
       resource
