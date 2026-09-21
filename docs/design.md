@@ -106,7 +106,7 @@ k8s-rails/
 ├── lib/
 │   ├── k8s-rails.rb         # エントリ。require 集 + モジュール定義
 │   └── k8s_rails/
-│       ├── version.rb       # VERSION = "0.1.0"
+│       ├── version.rb       # VERSION = "0.2.0"
 │       ├── configuration.rb # Config: namespace, connection, 計測 ON/OFF
 │       ├── client.rb        # 接続解決・BearerToken 橋渡し・計測ラップ
 │       ├── crd.rb           # K8sRails.crd 宣言 → Resource 生成
@@ -328,8 +328,9 @@ k8s-rails.request  payload: { operation: :list, group:, version:, plural:, names
 | バージョン | 内容 | 出口基準 |
 |---|---|---|
 | **v0.1** | §5 の公開 API（CRD 宣言 / list / find / create / patch / 例外 / 計測 / スタブテスト）+ README | rspec 全緑 + **consumer アプリの K8s サービスを `k8s-rails` に移行して動作確認**（§12） |
-| v0.2 | watch（`watch` メソッド、kruby の watch サポート上）、core v1 built-in リソース対応（CustomObjects API では不可なため別途 core API 経路、§2.2）、kind E2E の CI 化 | v0.1 運用 1 ヶ月後のフィードバック |
-| v0.3 | （展望）複数クラスタ（ネームスペース化された client 集合）、リトライポリシー | — |
+| **v0.2** | #16–#19 の公開 API 拡充・修正（cluster-scoped CRD `scope:` + `*_cluster` メソッド、`configure` のアトミック契約、`connected?` の注入契約、kruby loader 探索順序の修正）。設計書 v0.1.12（案） | rspec 全緑（クラスタ不要）+ 公開 gem push（v0.1.0 と同導線） |
+| v0.3 | watch（`watch` メソッド、kruby の watch サポート上）、core v1 built-in リソース対応（CustomObjects API では不可なため別途 core API 経路、§2.2）、kind E2E の CI 化、Ruby 3.5 / 4.0 対応（検証の上宣言範囲・matrix を拡大） | v0.2 運用のフィードバック |
+| v0.4 | （展望）複数クラスタ（ネームスペース化された client 集合）、リトライポリシー | — |
 
 v0.1 の milestone 分割（開発セッション向けのタスク単位目安）:
 

@@ -2,6 +2,34 @@
 
 `k8s-rails` の全 notable な変更はこのファイルに記録する。
 
+## 0.2.0
+
+- **cluster-scoped CRD サポート**（#17）: `K8sRails.crd` に `scope: :namespaced`
+  （既定）/ `:cluster` を追加。cluster-scoped CRD（ClusterIssuer 等）は
+  `scope: :cluster`（`namespace:` 併用不可）で宣言し、`list_cluster` /
+  `find_cluster` / `find_or_nil_cluster` / `create_cluster` /
+  `patch_cluster` を使う。スコープと非対称な呼び出し（namespaced 宣言で
+  `*_cluster` / cluster 宣言で素のメソッド）は `ArgumentError`。
+  transport は kruby の `*_cluster_custom_object` 4 メソッドを新たに利用。
+- **`configure` のアトミック契約**（#16）: 「一度だけ」はブロックが
+  正常終了した場合のみ成立。ブロックが異常終了した（任意の例外 —
+  `LoadError` / `ScriptError` を含む — / `throw` / non-local return 等）
+  場合は設定済みフラグがリセットされ、後続の `configure` は通常どおり
+  実行される。異常終了前に書き込まれた属性は残存する（再実行ブロックは
+  依存する属性を全て設定する責務を負う。ロールバックはしない）。
+- **`connected?` の注入契約**（#18）: `config.api_client` 注入時は
+  I/O なしで `true`（注入トランスポートが接続面そのもの）。
+  非注入時は従来どおり VersionApi プローブ。
+- **接続設定探索順序の修正**（#19）: README / 設計書 / 設定コメントの
+  自動検出順序を kruby 1.36.x の loader 実装順
+  （**KUBECONFIG → `~/.kube/config` → in-cluster**、in-cluster は最後）
+  に修正（従来の「in-cluster → KUBECONFIG」記述は誤り）。kruby 上げ替え
+  時の再確認手順を設計書 §7 に追加。
+- テスト注入スタブ（`config.api_client`）の契約: namespaced 4 メソッド ＋
+  cluster 4 メソッド（namespaced 宣言のみ使う場合は前者 4 メソッドで足りる）。
+- 設計書 KBR-DESIGN-001 v0.1.12（案）へ更新（§5.1 / §5.2 / §5.3 / §6 /
+  §7 / §9 / §14）。
+
 ## 0.1.0
 
 - **M0**: gem 骨子（gemspec / Gemfile / Rakefile / version / require 構造）
