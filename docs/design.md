@@ -1,7 +1,7 @@
 # kuberails 設計書
 
 - 文書番号: KBR-DESIGN-001
-- 版: 0.1.9（案）
+- 版: 0.1.10（案）
 - 日付: 2026-09-15
 - 対象リポジトリ: kuberails（本設計の実装先）
 - ライセンス: MIT（LICENSE は main に既存）
@@ -343,7 +343,10 @@ PR の差分を最小化）。
   - 未取得の gem は**初回 push が所有権の取得**（`gem owner` は `--add` による
     **追加** owner のみで、位置引数に user を取る構文は存在しない・
     gem 4.0.7 `gem owner --help` で実測 2026-09-21）
-  - 公開直前に tag を切っておくと追溯性が高い（`git tag v<VERSION>`）。
+  - 公開直前に tag を切って **remote へ push** すると追溯性が高い
+    （`git tag v<VERSION> && git push origin v<VERSION>`）。
+    GitHub 上でリリースコミットと tag が対応付けられ、
+    公開した gem のバージョンがどのコミットに基づくかを追跡できる。
     tag 名と gemspec の `VERSION` は一致させる
   - テスト CI（`.github/workflows/test.yml`）は push / PR 時に rspec + rubocop を実行。
     gemspec の宣言範囲（`>= 3.3, < 4.0`）を matrix で検証:
@@ -372,3 +375,4 @@ PR の差分を最小化）。
 | 0.1.7 | 2026-09-21 | PR #11 レビュー第 3 波対応（Copilot ×1）: `>= 3.3` が Ruby 3.4+ も含むため、テスト / verify matrix に **3.4.10（最新 stable・ruby-lang.org 実測）** を追加（3.3.0 / 3.3.8 / 3.4.10 の 3 系統）。新しい stable minor が出た際の matrix 追加を §13 に手順として明記 | 実装反映済み |
 | 0.1.8 | 2026-09-21 | PR #11 レビュー第 4 波対応（Copilot ×3）: 指摘（「Ruby 3.5 が stable 化したため matrix に追加せよ」）を検証した結果 **3.5 は preview であり claim は誤り**（ruby/ruby タグ `v3_5_0_preview1`・2026-09-21 実測）と判明。ただし指摘の根本（宣言と検証範囲のズレ）は**Ruby 4.0 が stable（v4.0.7）だったため**実際に存在した。対策として宣言範囲を **`>= 3.3, < 4.0` に改訂**（gemspec / §6 / README / CHANGELOG）し、宣言範囲 = matrix 検証範囲（3.3.0 / 3.3.8 / 3.4.10）を一致。4.0 / 3.5 対応は v0.2 以降で検証の上宣言に含める方針 | 実装反映済み |
 | 0.1.9 | 2026-09-21 | public リポジトリ化の準備: ①公開導線を**ローカル PC から手動 `gem push`** に変更（kruby と同様の運用方針・CI 自動公開は廃止、publish workflow を削除、test workflow の push/PR テストのみ残す）②§13 公開手順の手動化（tag は追溯性のため推奨）③内部 consumer アプリの名称・構造への言及を §1〜§14 全箇所から除去し「consumer アプリ」に一般化 | 実装反映済み |
+| 0.1.10 | 2026-09-21 | PR #12 レビュー対応（Copilot）: §13 の公開手順で tag の **remote への push**（`git push origin v<VERSION>`）が欠落しており、GitHub 上のリリースコミットとの対応付け（追溯性）が確保できないとの指摘を反映 | 実装反映済み |
