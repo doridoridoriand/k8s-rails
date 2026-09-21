@@ -64,6 +64,31 @@ RSpec.describe K8sRails do
       expect(K8sRails.config.instrumentation).to be(false)
     end
 
+    it "allows a later configure after a non-StandardError (LoadError) failure (#16)" do
+      expect do
+        K8sRails.configure { raise LoadError, "cannot load optional initializer" }
+      end.to raise_error(LoadError)
+
+      # LoadError < ScriptError, not StandardError — the flag must still reset.
+      expect(K8sRails).not_to receive(:warn)
+      K8sRails.configure { |c| c.namespace = "retry" }
+      expect(K8sRails.config.namespace).to eq("retry")
+    end
+
+    it "allows a later configure after a non-local exit from the block (throw, #16)" do
+      # A `throw` from the block is a non-local exit that skips the normal
+      # return; catch it here (UncaughtThrowError is Ruby 3.4+, so it cannot
+      # be used as the matcher on the 3.3 CI matrix).
+      catch(:skip_config) do
+        K8sRails.configure { throw :skip_config }
+      end
+
+      # The flag must have been reset despite the non-local exit.
+      expect(K8sRails).not_to receive(:warn)
+      K8sRails.configure { |c| c.namespace = "after-throw" }
+      expect(K8sRails.config.namespace).to eq("after-throw")
+    end
+
     after { K8sRails.reset! }
   end
 

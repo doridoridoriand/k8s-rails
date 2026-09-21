@@ -25,11 +25,13 @@ module K8sRails
     # (design §5.1). Yields the Configuration object.
     #
     # Atomicity contract: "runs once" holds only when the block returns
-    # normally. If the block raises, the flag is NOT set, so a later
-    # `configure` call re-runs normally. However, attribute writes made
-    # before the raise REMAIN on the shared Configuration — a failed block
-    # may leave a partially applied state; the re-run block is responsible
-    # for setting every attribute it depends on (documented in design §5.1).
+    # normally. If the block exits abnormally (any exception — including
+    # LoadError/ScriptError — throw, non-local return, ...), the flag is
+    # reset, so a later `configure` call re-runs normally. However,
+    # attribute writes made before the exit REMAIN on the shared
+    # Configuration — a failed block may leave a partially applied state;
+    # the re-run block is responsible for setting every attribute it
+    # depends on (documented in design §5.1).
     def configure
       if @configured
         warn "[K8sRails] K8sRails.configure called more than once; ignoring the second call."
@@ -117,15 +119,20 @@ module K8sRails
     private
 
     # Runs the configure block with the configured-once contract (§5.1):
-    # the flag is set only if the block returns normally. A raising block
-    # resets it (later `configure` calls re-run), but attribute writes made
-    # before the raise remain on the shared Configuration.
+    # the flag is set only if the block returns normally. ANY abnormal exit
+    # (StandardError, LoadError/ScriptError, throw, non-local return, other
+    # Exception subclasses) resets it so a later `configure` re-runs — but
+    # attribute writes made before the exit remain on the shared
+    # Configuration.
     def run_configure_block
       @configured = true
-      yield
-    rescue StandardError
-      @configured = false
-      raise
+      ok = false
+      begin
+        yield
+        ok = true
+      ensure
+        @configured = false unless ok
+      end
     end
   end
 

@@ -75,10 +75,12 @@ end
 ```
 
 - `configure` is effective **only once** — but only when the block returns
-  normally. If the block raises, the "configured" flag is reset, so a later
-  `configure` runs normally. Note that attribute writes made before the raise
-  **remain** on the shared configuration (a partially applied state is
-  possible); a re-run block should set every attribute it depends on.
+  normally. If the block exits abnormally (any exception, including
+  `LoadError`; `throw`; non-local return), the "configured" flag is reset,
+  so a later `configure` runs normally. Note that attribute writes made
+  before the abnormal exit **remain** on the shared configuration (a
+  partially applied state is possible); a re-run block should set every
+  attribute it depends on.
   A second call on an already-configured gem prints a warning and is ignored
   (use `K8sRails.reset!` to reset the configuration, the cached transport, and
   declared CRDs — primarily for tests).
@@ -96,8 +98,10 @@ naming convention). Re-declaring the same kind raises
 
 Return values are **always string-keyed hashes**. kruby returns symbol keys,
 but Rails-side JSON/views work with string keys, so the gem normalizes
-internally in pure Ruby (no ActiveSupport dependency). Every method accepts a
-`namespace:` argument to override the namespace from the declaration.
+internally in pure Ruby (no ActiveSupport dependency). Every namespaced
+method accepts a `namespace:` argument to override the namespace from the
+declaration (the `*_cluster` methods take no `namespace:` — see
+[Cluster-scoped CRDs](#cluster-scoped-crds)).
 
 `readonly` must be an **explicit boolean** (`nil` or other values raise
 `ArgumentError`). Writes are enabled **only** by `readonly: false`, so a

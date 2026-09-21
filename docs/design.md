@@ -1,7 +1,7 @@
 # k8s-rails 設計書
 
 - 文書番号: KBR-DESIGN-001
-- 版: 0.1.11（案）
+- 版: 0.1.12（案）
 - 日付: 2026-09-15
 - 対象リポジトリ: k8s-rails（本設計の実装先）
 - ライセンス: MIT（LICENSE は main に既存）
@@ -143,15 +143,17 @@ end
 |---|---|---|
 | `namespace` | `"default"` | CRD 宣言が namespace 未指定時のデフォルト |
 | `connection` | `nil`（自動検出） | `Kubernetes::Configuration` インスタンス。認証を上書きする場合に指定。省略時の探索順序（kruby 1.36.x の loader 実装順）: **KUBECONFIG → `~/.kube/config` → in-cluster**（in-cluster はファイル系が両方無効な場合の**最後**。kruby 上げ替え時に loader を再確認すること — §7） |
-| `api_client` | `nil` | **テスト専用**: kruby の `CustomObjectsApi` と同型の 4 メソッド（`get_namespaced_custom_object` / `list_namespaced_custom_object` / `create_namespaced_custom_object` / `patch_namespaced_custom_object`）を実装する素のオブジェクト。指定時は `Client.build` が接続解決をスキープして `StringKeyedAdapter` で包んで使う（§5.2・§9） |
+| `api_client` | `nil` | **テスト専用**: kruby の `CustomObjectsApi` と同型のメソッド（namespaced 4 メソッド `get_namespaced_custom_object` / `list_namespaced_custom_object` / `create_namespaced_custom_object` / `patch_namespaced_custom_object` ＋ cluster 4 メソッド `get_cluster_custom_object` / `list_cluster_custom_object` / `create_cluster_custom_object` / `patch_cluster_custom_object`）を実装する素のオブジェクト（namespaced 宣言のみを使う場合は namespaced 4 メソッドで足りる）。指定時は `Client.build` が接続解決をスキープして `StringKeyedAdapter` で包んで使う（§5.2・§9） |
 | `instrumentation` | `true` | `ActiveSupport::Notifications` で計測する（§8） |
 
 - 設定は `K8sRails.configure` で**一度だけ**。再実行は警告（`Warning`）+ 無視。
-  **「一度だけ」はブロックが正常終了した場合に限る**: ブロックが例外を送出した場合は
-  設定済みフラグがリセットされ、後続の `configure` は通常どおり実行される。ただし例外送出前に
-  書き込まれた属性は共有 Configuration に**残存する**（部分的な設定状態になり得るため、
-  再実行ブロックは依存する属性を全て設定する責務を負う。アトミックなロールバックは行わない —
-  Configuration は純データで 4 属性のみのため、複写＋スワップの複雑さに見合わない）。
+  **「一度だけ」はブロックが正常終了した場合に限る**: ブロックが異常終了した
+  （任意の例外送出 — `LoadError` / `ScriptError` を含む — / `throw` /
+  non-local return 等）場合は設定済みフラグがリセットされ、後続の `configure`
+  は通常どおり実行される。ただし異常終了前に書き込まれた属性は共有 Configuration
+  に**残存する**（部分的な設定状態になり得るため、再実行ブロックは依存する属性を
+  全て設定する責務を負う。アトミックなロールバックは行わない — Configuration
+  は純データで 4 属性のみのため、複写＋スワップの複雑さに見合わない）。
 - `K8sRails.reset!`（テスト用）で接続キャッシュ・宣言済 CRD を破棄できる。
 
 ### 5.2 接続
@@ -268,7 +270,7 @@ end
 | 依存 | 制約 | 理由 |
 |---|---|---|
 | Ruby | `>= 3.3, < 4.0` | 下限: kruby 1.36.x が `required_ruby_version ">= 3.3"` を宣言（RubyGems API で実測 2026-09-21、1.36.0.1〜1.36.4.1 全バージョン）。上限: 「宣言した Ruby minor を必ず CI で検証する」方針（レビュー対応・2026-09-21）— 2026-09-21 時点で Ruby 4.0 は stable（v4.0.7）だが未検証、3.5 は preview（v3_5_0_preview1）のため、宣言範囲を 3.x に限定。4.0 / 3.5 対応は v0.2 以降で検証の上宣言に含める |
-| `kruby` | `~> 1.36.0` | consumer アプリと同一 pin。`~> 1.36.0` は 1.36.x のみ許可（`~> 1.36` 形式は 1.37 以降も許容してしまうため使用しない）。新しめの kruby に対応する場合は §7 の確認事項（client.rb 4 メソッド・K1 橋渡し）を済ませてから明示的に上げ替える |
+| `kruby` | `~> 1.36.0` | consumer アプリと同一 pin。`~> 1.36.0` は 1.36.x のみ許可（`~> 1.36` 形式は 1.37 以降も許容してしまうため使用しない）。新しめの kruby に対応する場合は §7 の確認事項（client.rb 8 メソッド（namespaced 4 + cluster 4）・K1 橋渡し・`default_config` 探索順序）を済ませてから明示的に上げ替える |
 | `activesupport` | **任意**（`>= 7.0`） | `defined?(ActiveSupport::Notifications)` でガード（計測のみ、§8）。Rails 無し環境（Cron スクリプト等）でも動作する必要がある — レスポンスの文字列キー化（K2）はこれに依存せず、gem 内部の純 Ruby 変換で担う（§5.2） |
 | `rspec` / `rubocop` | 開発依存 | spec / lint |
 
@@ -422,3 +424,4 @@ PR の差分を最小化）。
 | 0.1.9 | 2026-09-21 | public リポジトリ化の準備: ①公開導線を**ローカル PC から手動 `gem push`** に変更（kruby と同様の運用方針・CI 自動公開は廃止、publish workflow を削除、test workflow の push/PR テストのみ残す）②§13 公開手順の手動化（tag は追溯性のため推奨）③内部 consumer アプリの名称・構造への言及を §1〜§14 全箇所から除去し「consumer アプリ」に一般化 | 実装反映済み |
 | 0.1.10 | 2026-09-21 | PR #12 レビュー対応（Copilot）: §13 の公開手順で tag の **remote への push**（`git push origin v<VERSION>`）が欠落しており、GitHub 上のリリースコミットとの対応付け（追溯性）が確保できないとの指摘を反映 | 実装反映済み |
 | 0.1.11 | 2026-09-22 | Issue #16–#19 対応: ①#16 `configure` の例外送出時は設定済みフラグをリセット（「一度だけ」はブロック正常終了時にのみ成立）。例外前に書かれた属性は残存することを契約として明文化（§5.1）②#17 `scope: :namespaced`（既定）/ `:cluster` を宣言 API に追加。cluster 系 4 メソッド（`list_cluster` / `find_cluster` / `find_or_nil_cluster` / `create_cluster` / `patch_cluster`）と双方向の ArgumentError 契約（§5.3）。transport は kruby の `*_cluster_custom_object` 4 メソッドを新たに使用③#18 `connected?` は `config.api_client` 注入時に I/O なしで `true`（§5.2）。注入下で Resource 操作と接続確認の挙動を一致させる④#19 kruby 1.36.x の loader 実装順（**KUBECONFIG → `~/.kube/config` → in-cluster**）を README / 設計書 / 設定コメントに明記し、§7 の上げ替え確認事項に探索順序の再確認を追加（in-cluster は最後。従来の「in-cluster → KUBECONFIG」記述は誤り） | 実装反映済み |
+| 0.1.12 | 2026-09-22 | PR #20 レビュー対応（Codex P2 + Copilot M/L 4 系統）: ①#16 のリセット範囲を `rescue StandardError` から**任意の異常終了**（`LoadError` / `ScriptError` / `throw` / non-local return 等）に拡大（成功マーカー + `ensure` で実装、spec 2 件追加）。§5.1 / README の契約文言も「任意の異常終了」に修正②README の「`namespace:` 引数を受け取る」記述を namespaced メソッドに限定（`*_cluster` は受け付けない）③§6 の kruby 上げ替え確認事項を 8 メソッド + 探索順序に同期④`api_client` 注入スタブの契約を namespaced 4 + cluster 4 の 8 メソッドに統一（§5.1 表 / configuration.rb コメント / §9） | 実装反映済み |
