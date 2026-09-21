@@ -133,8 +133,8 @@ ClusterIssuer.patch_cluster("letsencrypt", [{ ... }])  # readonly: false only
 On a `scope: :namespaced` declaration (the default) the `*_cluster` methods
 raise `ArgumentError` — the CRD is namespaced, so the cluster endpoints would
 404 anyway. For a cluster-scoped declaration, use the `*_cluster` methods
-(the plain `list`/`find`/... would call the namespaced endpoints and 404;
-their `namespace:` argument is ignored by the `*_cluster` methods).
+(the plain `list`/`find`/... would call the namespaced endpoints and 404, so
+they raise `ArgumentError` there as well).
 
 ## Connectivity check
 
