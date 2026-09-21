@@ -104,7 +104,7 @@ k8s-rails/
 │   └── design.md            # 本設計書
 ├── lib/
 │   ├── k8s-rails.rb         # エントリ。require 集 + モジュール定義
-│   └── k8s-rails/
+│   └── k8s_rails/
 │       ├── version.rb       # VERSION = "0.1.0"
 │       ├── configuration.rb # Config: namespace, connection, 計測 ON/OFF
 │       ├── client.rb        # 接続解決・BearerToken 橋渡し・計測ラップ
@@ -113,7 +113,7 @@ k8s-rails/
 │       └── errors.rb        # Unavailable / NotFound / ApiError
 ├── spec/
 │   ├── spec_helper.rb
-│   ├── k8s-rails_spec.rb    # 設定 / lazy connect
+│   ├── k8s_rails_spec.rb    # 設定 / lazy connect
 │   ├── client_spec.rb       # 橋渡し・計測・例外変換
 │   ├── crd_spec.rb          # 宣言 → メソッド生成
 │   └── resource_spec.rb     # list/find/create/patch の整形
@@ -330,8 +330,13 @@ PR の差分を最小化）。
 
 ## 13. 命名・公開
 
-- **gem 名 / リポジトリ名: `k8s-rails`**（RubyGems で空きを確認済み 2026-09-15。
-  `kube-rails` は 2015 年の旧 gem が取得済みであり使用不可）
+- **gem 名 / リポジトリ名: `k8s-rails`**（RubyGems で空きを確認済み 2026-09-21）。
+  当初の名 `kuberails` は **push 時の類似名チェックで却下**された
+  （RubyGems は名前のハイフンを無視して比較し、`kube-rails`（2015 年の旧 gem・
+  取得済み）と正規化すると同一文字列になるため使用不可）。命名規則は
+  **gem 名 = ハイフン**（`k8s-rails`）・**モジュール = CamelCase**（`K8sRails`）・
+  **ファイル / ディレクトリ = snake_case**（`lib/k8s_rails/`。エントリのみ
+  `lib/k8s-rails.rb` と require 名に合わせたハイフン）で統一する
 - GitHub: `doridoridoriand/k8s-rails`（org `k8s-rails` は他者が使用済み。個人アカウント配下）
 - 公開は v0.1 完成後、**ローカル PC から手動 `gem push`**（kruby と同様の運用方針・
   2026-09-21 確定）。CI による自動公開は行わない。
