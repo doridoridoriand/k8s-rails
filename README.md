@@ -1,107 +1,141 @@
 # kuberails
 
-Rails アプリが Kubernetes API・CRD を扱う際の**接続・CRD アクセス・障害処理の規約層**を
-gem として提供する。（設計書: [docs/design.md](docs/design.md), KBR-DESIGN-001）
+> A Kubernetes API / CRD convention layer for Rails applications.
 
-- Ruby: `>= 3.3, < 4.0`（下限: kruby 1.36.x が Ruby 3.3 を要求 / 上限:
-  未検証の Ruby 4.x を宣言から除外するため。開発は 3.3.8、`.ruby-version`
-  で pin、CI は 3.3.0 / 3.3.8 / 3.4.10 の matrix で宣言範囲を検証）
-- kruby: `~> 1.36.0`（公式 Kubernetes OpenAPI クライアント）
-- Kubernetes サーバ: **v1.33.x で検証済み**（実クラスタ microk8s v1.33.13、2026-09-21）。
-  kruby 1.36.x は k8s 1.36 系のクライアントであり、1.33 系のサーバとの組合せで
-  動作確認済み。より新しいサーバ（1.36 等）でも同じ API（CustomObjects API v1）
-  を使うため互換性は期待できるが、まだ実機検証はしていない
-- 依存: 実行時 **kruby のみ**。ActiveSupport は計測（§8）にだけ任意で使う（無い環境は no-op）
+`kuberails` provides the **connection, CRD access, and error-handling convention
+layer** for Rails applications that talk to the Kubernetes API.
+
+[![Test](https://github.com/doridoridoriand/kuberails/actions/workflows/test.yml/badge.svg)](https://github.com/doridoridoriand/kuberails/actions/workflows/test.yml)
+[![Gem Version](https://badge.fury.io/rb/kuberails.svg)](https://rubygems.org/gems/kuberails)
+
+For the design rationale, see the [design document (docs/design.md)](docs/design.md) (KBR-DESIGN-001).
+
+## Requirements
+
+| Item | Supported range | Notes |
+|------|-----------------|-------|
+| Ruby | `>= 3.3, < 4.0` | Floor: kruby 1.36.x requires Ruby 3.3. Upper bound: unverified Ruby 4.x is excluded from the declared range. CI verifies the declared range with a 3.3.0 / 3.3.8 / 3.4.10 matrix |
+| kruby | `~> 1.36.0` | The official Kubernetes OpenAPI client |
+| Kubernetes server | **Verified on v1.33.x** (a real cluster, microk8s v1.33.13, 2026-09-21) | kruby 1.36.x is a 1.36-series client. Newer servers (1.36, etc.) use the same API (CustomObjects API v1), so compatibility is expected, but has not yet been verified against a real cluster |
+| Dependencies | **kruby only** at runtime | ActiveSupport is used only for optional [instrumentation](#instrumentation-optional-activesupport) (no-op when absent) |
+
+## Installation
+
+```ruby
+# Gemfile
+gem "kuberails", "~> 0.1"
+```
 
 ```ruby
 require "kuberails"
 KubeRails::VERSION # => "0.1.0"
 ```
 
-ロードは副作用なし。kruby 本体は `KubeRails.client` / `KubeRails.connected?` /
-CRD 操作の初回呼び出しの**lazy connect** で require されるため、クラスタが
-接続できていなくても gem はロードできます（§5.2）。
+`require` is side-effect-free and needs no cluster. kruby itself is loaded
+lazily on the first `KubeRails.client` / `KubeRails.connected?` / CRD operation
+(**lazy connect**), so the gem can be required even when no cluster is
+reachable.
 
-## 設定
+## Quick start
 
 ```ruby
+# config/initializers/kuberails.rb
 KubeRails.configure do |config|
-  config.namespace = "team-a"          # デフォルト namespace（宣言・呼び出しで上書き可）
-  # config.connection = my_config      # Kubernetes::Configuration を直接渡す（任意）
-  # config.instrumentation = false     # §8 計測を無効化（既定 true。ActiveSupport 存在時のみ有効）
-  # config.api_client = stub           # テスト専用: transport を注入（§5.1）
+  config.namespace = "team-a" # default namespace (can be overridden per declaration or per call)
 end
-```
 
-接続解決順（§5.2）: `config.api_client`（テスト注入）→ `config.connection` →
-`Kubernetes::Configuration.default_config`（KUBECONFIG / in-cluster）。
-
-## CRD 宣言とアクセス
-
-`plural` / `kind` は**推測しない**（推測が外れる CRD が多い、K5）ので宣言で指定します。
-同名再宣言は `KubeRails::RedeclarationError`（設定ミスの検出）。
-
-```ruby
-# config/initializers/kuberails_crd.rb
+# Declare the CRD you work with (group / version / plural / kind are never guessed)
 Workflow = KubeRails.crd(
   group:  "argoproj.io",
   version: "v1alpha1",
   plural: "workflows",
   kind:   "Workflow",
-  namespace: KubeRails.config.namespace, # 省略可
-  readonly: false,                       # 既定 true。false で create/patch 有効化（K4）
+  readonly: false, # default true; false enables create/patch
 )
-
-Workflow.list                     # => [{"name" => "...", "labels" => {...}}, ...] 文字列キー
-Workflow.find("wf-1")             # 同型 / 存在しなければ KubeRails::NotFound
-Workflow.find_or_nil("wf-1")      # 同上、NotFound 時は nil
-Workflow.create({ metadata: { name: "wf-1" } })   # readonly: false のみ
-Workflow.patch("wf-1", [{ op: "replace", path: "/spec/a", value: 2 }]) # 同左
 ```
 
-- **戻り値は常に文字列キーの Hash**（K2）。ActiveSupport の `deep_stringify_keys`
-  ではなく gem 内部の純 Ruby 変換（`KubeRails::Normalizer`）で行うため AS 非依存。
-- 各メソッドは `namespace:` 引数を受け取り、宣言時の namespace を上書きできます。
-- `readonly` は**明示的な boolean**（`nil` 等は `ArgumentError`）。書き込み有効化は
-  `readonly: false` のみ（fail-open 防止）。
-
-## 接続確認
-
 ```ruby
-KubeRails.connected?  # 成功時は true。失敗は KubeRails::Unavailable / ApiError を raise
-                      # /version 相当の軽量確認（VersionApi#get_code）
+Workflow.list                 # => [{"name" => "...", "labels" => {...}}, ...]
+Workflow.find("wf-1")         # same shape / raises KubeRails::NotFound when absent
+Workflow.find_or_nil("wf-1")  # same, but returns nil instead of raising
+Workflow.create({ metadata: { name: "wf-1" } })                     # readonly: false only
+Workflow.patch("wf-1", [{ op: "replace", path: "/spec/a", value: 2 }]) # readonly: false only
+
+KubeRails.connected?          # true on success; raises on failure
 ```
 
-`false` を返す経路はありません — 接続不能は例外として上がります（`rescue` で扱う）。
-`KubeRails::Client.build` は lazy で初回 API 呼び出し時に実際の接続が行われます。
-
-## 例外体系（K3）
+## Configuration
 
 ```ruby
+KubeRails.configure do |config|
+  config.namespace = "team-a"          # default namespace (default: "default")
+  # config.connection = my_config      # pass a Kubernetes::Configuration directly (optional)
+  # config.instrumentation = false     # disable instrumentation (default true; only effective when ActiveSupport is present)
+  # config.api_client = stub           # test-only: inject a transport (see [Testing](#testing))
+end
+```
+
+- `configure` is effective **only once**. A second call prints a warning and is
+  ignored (use `KubeRails.reset!` to reset the configuration, the cached
+  transport, and declared CRDs — primarily for tests).
+- Connection resolution order: `config.api_client` (test injection) →
+  `config.connection` → `Kubernetes::Configuration.default_config`
+  (automatic in-cluster → KUBECONFIG detection).
+
+## CRD declaration and access
+
+`plural` / `kind` are **never guessed** (many CRDs do not follow the obvious
+naming convention). Re-declaring the same kind raises
+`KubeRails::RedeclarationError` (configuration-mistake detection).
+
+Return values are **always string-keyed hashes**. kruby returns symbol keys,
+but Rails-side JSON/views work with string keys, so the gem normalizes
+internally in pure Ruby (no ActiveSupport dependency). Every method accepts a
+`namespace:` argument to override the namespace from the declaration.
+
+`readonly` must be an **explicit boolean** (`nil` or other values raise
+`ArgumentError`). Writes are enabled **only** by `readonly: false`, so a
+missing flag can never fail open.
+
+## Connectivity check
+
+```ruby
+KubeRails.connected?  # true on success; raises KubeRails::Unavailable / ApiError on failure
+                      # a lightweight /version-equivalent check
+```
+
+It never returns `false` — a connection failure surfaces as an exception
+(handle it with `rescue`). The actual API connection is established lazily on
+the first API call.
+
+## Exception hierarchy
+
+```
 KubeRails::Error < StandardError
-├── KubeRails::Unavailable   # 転送層失敗（DNS/タイムアウト/接続拒否。kruby 1.36.x では ApiError code 0）
+├── KubeRails::Unavailable   # transport-layer failure (DNS/timeout/connection refused; kruby 1.36.x reports it as ApiError code 0)
 ├── KubeRails::NotFound      # HTTP 404
-├── KubeRails::ApiError      # その他の API エラー（401/403/409/422/5xx）。#code と #response を保持
-├── KubeRails::ReadOnlyError      # readonly: true 宣言で create/patch を呼ばれた
-└── KubeRails::RedeclarationError # 同名 CRD の再宣言
+├── KubeRails::ApiError      # other API errors (401/403/409/422/5xx); holds #code and #response
+├── KubeRails::ReadOnlyError      # create/patch called on a readonly: true declaration
+└── KubeRails::RedeclarationError # re-declaration of an already-declared CRD kind
 ```
 
-呼び出し側の推奨パターン:
+Recommended caller pattern:
 
 ```ruby
 begin
   Workflow.list
-rescue KubeRails::Unavailable => e
-  # クラスタ起因 → ダッシュボード表示の「取得不能」フォールバック
+rescue KubeRails::Unavailable
+  # cluster-side problem → "unable to load" fallback UI, etc.
 rescue KubeRails::ApiError => e
-  # e.code / e.response で原因を判定
+  # inspect e.code / e.response to determine the cause
 end
 ```
 
-## 計測（ActiveSupport 任意）
+## Instrumentation (optional ActiveSupport)
 
-`config.instrumentation = true` かつ ActiveSupport がロード済みのとき、各 API 呼び出しを
-`kuberails.request` notification で計測します（無い環境は no-op）:
+When `config.instrumentation = true` (the default) and ActiveSupport is loaded,
+each API call is published as a `kuberails.request` notification (no-op when
+ActiveSupport is absent):
 
 ```
 kuberails.request
@@ -109,7 +143,7 @@ kuberails.request
              status: "ok" | "unavailable" | "api_error" }
 ```
 
-Rails アプリでは `ActiveSupport::Notifications` / `log_subscriptions` で拾えます:
+In a Rails app you can subscribe with `ActiveSupport::Notifications`:
 
 ```ruby
 ActiveSupport::Notifications.subscribe("kuberails.request") do |name, start, finish, id, payload|
@@ -117,16 +151,11 @@ ActiveSupport::Notifications.subscribe("kuberails.request") do |name, start, fin
 end
 ```
 
-## 開発
+## Testing
 
-```
-bundle install
-bundle exec rake   # rspec + rubocop
-```
-
-テストは**クラスタ不要**です。`config.api_client` に transport のスタブを
-注入して行います（§9）。注入先は内部で `StringKeyedAdapter` に包まれるため、
-スタブは kruby の `CustomObjectsApi` と同型の 4 メソッドを実装します:
+The test suite needs **no cluster**. Tests inject a transport stub via
+`config.api_client`. The stub is wrapped internally by an adapter, so it just
+implements the same four methods as kruby's `CustomObjectsApi`:
 
 ```ruby
 class StubTransport
@@ -139,17 +168,35 @@ end
 KubeRails.configure { |c| c.api_client = StubTransport.new }
 ```
 
-## 設計メモ: kruby 1.36 の K1（トークンキー不一致）
+## Development
 
-kruby 1.36.x の in-cluster / KUBECONFIG 設定が Bearer トークンを
-`api_key['authorization']` に書きますが、`Configuration#auth_settings` が
-`Authorization` ヘッダに読むのは `api_key['BearerToken']`。キーがずれているため
-**そのままでは Authorization ヘッダが空 → 401** になります。kuberails は
-`Client.build` 時に `authorization` を `BearerToken` に複製する「K1 橋渡し」を
-自動で行います（`BearerToken` が既に設定されていれば上書きしません）。
-kruby 本体の挙動（gem の外側）に依存するクラスタ接続で 401 が出たら、まず
-このトークンキーの問題を確認してください。
+```
+bundle install
+bundle exec rake   # rspec + rubocop
+```
+
+## Known issue: kruby 1.36 bearer-token key mismatch
+
+kruby 1.36.x's in-cluster / KUBECONFIG configuration writes the bearer token
+to `api_key['authorization']`, but `Configuration#auth_settings` reads
+`api_key['BearerToken']` for the `Authorization` header. Because the keys do
+not match, **the Authorization header ends up empty and requests fail with
+401** when using kruby's configuration directly.
+
+kuberails automatically copies `authorization` to `BearerToken` when building
+its client (the design document calls this the "K1 bridge"), so connections
+through kuberails are unaffected (it does not overwrite an already-set
+`BearerToken`). If you see 401s from a cluster connection that relies on
+kruby's own configuration behavior (outside this gem), check this token-key
+issue first.
+
+## Roadmap (v0.2+)
+
+- Ruby 3.5 / 4.0 support (after verifying against the stable releases, then
+  widening the declared range and the CI matrix)
+- CI-based E2E tests using kind
+- watch (streaming) support, under consideration
 
 ## License
 
-MIT（[LICENSE](LICENSE)）
+MIT ([LICENSE](LICENSE))
