@@ -1,11 +1,11 @@
-# kuberails
+# k8s-rails
 A Kubernetes API / CRD convention layer for Rails applications.
 
-`kuberails` provides the **connection, CRD access, and error-handling convention
+`k8s-rails` provides the **connection, CRD access, and error-handling convention
 layer** for Rails applications that talk to the Kubernetes API.
 
-[![Test](https://github.com/doridoridoriand/kuberails/actions/workflows/test.yml/badge.svg)](https://github.com/doridoridoriand/kuberails/actions/workflows/test.yml)
-[![Gem Version](https://badge.fury.io/rb/kuberails.svg)](https://rubygems.org/gems/kuberails)
+[![Test](https://github.com/doridoridoriand/k8s-rails/actions/workflows/test.yml/badge.svg)](https://github.com/doridoridoriand/k8s-rails/actions/workflows/test.yml)
+[![Gem Version](https://badge.fury.io/rb/k8s-rails.svg)](https://rubygems.org/gems/k8s-rails)
 
 For the design rationale, see the [design document (docs/design.md)](docs/design.md) (KBR-DESIGN-001).
 
@@ -22,29 +22,29 @@ For the design rationale, see the [design document (docs/design.md)](docs/design
 
 ```ruby
 # Gemfile
-gem "kuberails", "~> 0.1"
+gem "k8s-rails", "~> 0.1"
 ```
 
 ```ruby
-require "kuberails"
-KubeRails::VERSION # => "0.1.0"
+require "k8s-rails"
+K8sRails::VERSION # => "0.1.0"
 ```
 
 `require` is side-effect-free and needs no cluster. kruby itself is loaded
-lazily on the first `KubeRails.client` / `KubeRails.connected?` / CRD operation
+lazily on the first `K8sRails.client` / `K8sRails.connected?` / CRD operation
 (**lazy connect**), so the gem can be required even when no cluster is
 reachable.
 
 ## Quick start
 
 ```ruby
-# config/initializers/kuberails.rb
-KubeRails.configure do |config|
+# config/initializers/k8s-rails.rb
+K8sRails.configure do |config|
   config.namespace = "team-a" # default namespace (can be overridden per declaration or per call)
 end
 
 # Declare the CRD you work with (group / version / plural / kind are never guessed)
-Workflow = KubeRails.crd(
+Workflow = K8sRails.crd(
   group:  "argoproj.io",
   version: "v1alpha1",
   plural: "workflows",
@@ -55,18 +55,18 @@ Workflow = KubeRails.crd(
 
 ```ruby
 Workflow.list                 # => [{"name" => "...", "labels" => {...}}, ...]
-Workflow.find("wf-1")         # same shape / raises KubeRails::NotFound when absent
+Workflow.find("wf-1")         # same shape / raises K8sRails::NotFound when absent
 Workflow.find_or_nil("wf-1")  # same, but returns nil instead of raising
 Workflow.create({ metadata: { name: "wf-1" } })                     # readonly: false only
 Workflow.patch("wf-1", [{ op: "replace", path: "/spec/a", value: 2 }]) # readonly: false only
 
-KubeRails.connected?          # true on success; raises on failure
+K8sRails.connected?          # true on success; raises on failure
 ```
 
 ## Configuration
 
 ```ruby
-KubeRails.configure do |config|
+K8sRails.configure do |config|
   config.namespace = "team-a"          # default namespace (default: "default")
   # config.connection = my_config      # pass a Kubernetes::Configuration directly (optional)
   # config.instrumentation = false     # disable instrumentation (default true; only effective when ActiveSupport is present)
@@ -75,7 +75,7 @@ end
 ```
 
 - `configure` is effective **only once**. A second call prints a warning and is
-  ignored (use `KubeRails.reset!` to reset the configuration, the cached
+  ignored (use `K8sRails.reset!` to reset the configuration, the cached
   transport, and declared CRDs — primarily for tests).
 - Connection resolution order: `config.api_client` (test injection) →
   `config.connection` → `Kubernetes::Configuration.default_config`
@@ -85,7 +85,7 @@ end
 
 `plural` / `kind` are **never guessed** (many CRDs do not follow the obvious
 naming convention). Re-declaring the same kind raises
-`KubeRails::RedeclarationError` (configuration-mistake detection).
+`K8sRails::RedeclarationError` (configuration-mistake detection).
 
 Return values are **always string-keyed hashes**. kruby returns symbol keys,
 but Rails-side JSON/views work with string keys, so the gem normalizes
@@ -99,7 +99,7 @@ missing flag can never fail open.
 ## Connectivity check
 
 ```ruby
-KubeRails.connected?  # true on success; raises KubeRails::Unavailable / ApiError on failure
+K8sRails.connected?  # true on success; raises K8sRails::Unavailable / ApiError on failure
                       # a lightweight /version-equivalent check
 ```
 
@@ -110,12 +110,12 @@ the first API call.
 ## Exception hierarchy
 
 ```
-KubeRails::Error < StandardError
-├── KubeRails::Unavailable   # transport-layer failure (DNS/timeout/connection refused; kruby 1.36.x reports it as ApiError code 0)
-├── KubeRails::NotFound      # HTTP 404
-├── KubeRails::ApiError      # other API errors (401/403/409/422/5xx); holds #code and #response
-├── KubeRails::ReadOnlyError      # create/patch called on a readonly: true declaration
-└── KubeRails::RedeclarationError # re-declaration of an already-declared CRD kind
+K8sRails::Error < StandardError
+├── K8sRails::Unavailable   # transport-layer failure (DNS/timeout/connection refused; kruby 1.36.x reports it as ApiError code 0)
+├── K8sRails::NotFound      # HTTP 404
+├── K8sRails::ApiError      # other API errors (401/403/409/422/5xx); holds #code and #response
+├── K8sRails::ReadOnlyError      # create/patch called on a readonly: true declaration
+└── K8sRails::RedeclarationError # re-declaration of an already-declared CRD kind
 ```
 
 Recommended caller pattern:
@@ -123,9 +123,9 @@ Recommended caller pattern:
 ```ruby
 begin
   Workflow.list
-rescue KubeRails::Unavailable
+rescue K8sRails::Unavailable
   # cluster-side problem → "unable to load" fallback UI, etc.
-rescue KubeRails::ApiError => e
+rescue K8sRails::ApiError => e
   # inspect e.code / e.response to determine the cause
 end
 ```
@@ -133,11 +133,11 @@ end
 ## Instrumentation (optional ActiveSupport)
 
 When `config.instrumentation = true` (the default) and ActiveSupport is loaded,
-each API call is published as a `kuberails.request` notification (no-op when
+each API call is published as a `k8s-rails.request` notification (no-op when
 ActiveSupport is absent):
 
 ```
-kuberails.request
+k8s-rails.request
   payload: { operation:, group:, version:, plural:, namespace:, duration_ms:,
              status: "ok" | "unavailable" | "api_error" }
 ```
@@ -145,8 +145,8 @@ kuberails.request
 In a Rails app you can subscribe with `ActiveSupport::Notifications`:
 
 ```ruby
-ActiveSupport::Notifications.subscribe("kuberails.request") do |name, start, finish, id, payload|
-  Rails.logger.info("[kuberails] #{payload[:operation]} #{payload[:plural]} (#{payload[:duration_ms]}ms) #{payload[:status]}")
+ActiveSupport::Notifications.subscribe("k8s-rails.request") do |name, start, finish, id, payload|
+  Rails.logger.info("[k8s-rails] #{payload[:operation]} #{payload[:plural]} (#{payload[:duration_ms]}ms) #{payload[:status]}")
 end
 ```
 
@@ -164,7 +164,7 @@ class StubTransport
   def patch_namespaced_custom_object(group, version, namespace, plural, name, body) = {}
 end
 
-KubeRails.configure { |c| c.api_client = StubTransport.new }
+K8sRails.configure { |c| c.api_client = StubTransport.new }
 ```
 
 ## Development
@@ -182,9 +182,9 @@ to `api_key['authorization']`, but `Configuration#auth_settings` reads
 not match, **the Authorization header ends up empty and requests fail with
 401** when using kruby's configuration directly.
 
-kuberails automatically copies `authorization` to `BearerToken` when building
+k8s-rails automatically copies `authorization` to `BearerToken` when building
 its client (the design document calls this the "K1 bridge"), so connections
-through kuberails are unaffected (it does not overwrite an already-set
+through k8s-rails are unaffected (it does not overwrite an already-set
 `BearerToken`). If you see 401s from a cluster connection that relies on
 kruby's own configuration behavior (outside this gem), check this token-key
 issue first.

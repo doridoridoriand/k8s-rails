@@ -1,4 +1,4 @@
-# rubocop configuration for kuberails (design §10 M3).
+# rubocop configuration for k8s-rails (design §10 M3).
 #
 # Baseline: rubocop's defaults for Ruby 3.3. Project conventions on top:
 #   - double-quoted strings (matches the design doc examples and the consumer app)
@@ -40,7 +40,7 @@ Metrics/BlockLength:
 Metrics/MethodLength:
   Exclude:
     - "spec/**/*"
-    - "lib/kuberails/crd.rb" # fixed 6-key keyword pass-through (design §5.3)
+    - "lib/k8s_rails/crd.rb" # fixed 6-key keyword pass-through (design §5.3)
 
 Metrics/ParameterLists:
   CountKeywordArgs: false
@@ -48,8 +48,14 @@ Metrics/ParameterLists:
   Exclude:
     # kruby's CustomObjectsApi fixed signature (patch legitimately has 6 args);
     # the spec test doubles mirror it.
-    - "lib/kuberails/client.rb"
+    - "lib/k8s_rails/client.rb"
     - "spec/**/*"
+
+# The entry point file matches the hyphenated gem name (require "k8s-rails"),
+# so it keeps the dash instead of snake_case.
+Naming/FileName:
+  Exclude:
+    - "lib/k8s-rails.rb"
 
 # Fixed (group, version, namespace, plural, ...) signatures come from kruby's
 # CustomObjectsApi and the §5.3 CRD declaration — the test doubles mirror that

@@ -2,19 +2,19 @@
 
 require_relative "resource"
 
-module KubeRails
+module K8sRails
   # CRD declaration registry + DSL (design §5.3 / K5).
   #
-  #   Workflow = KubeRails.crd(
+  #   Workflow = K8sRails.crd(
   #     group: "argoproj.io", version: "v1alpha1",
   #     plural: "workflows", kind: "Workflow",
-  #     namespace: KubeRails.config.namespace, # optional
+  #     namespace: K8sRails.config.namespace, # optional
   #     readonly: false,                        # default true
   #   )
   #
   # `crd` returns a `Resource` subclass with the coordinates bound; the same
   # class is registered under its kind name so a second declaration of the
-  # same kind raises KubeRails::RedeclarationError (config-mistake detection).
+  # same kind raises K8sRails::RedeclarationError (config-mistake detection).
   # The registry is in-memory: no kruby, no network at declaration time.
   class CRD
     # Registered kinds, e.g. { "Workflow" => Workflow }.

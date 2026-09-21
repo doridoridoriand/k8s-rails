@@ -1,9 +1,9 @@
-# kuberails 設計書
+# k8s-rails 設計書
 
 - 文書番号: KBR-DESIGN-001
 - 版: 0.1.10（案）
 - 日付: 2026-09-15
-- 対象リポジトリ: kuberails（本設計の実装先）
+- 対象リポジトリ: k8s-rails（本設計の実装先）
 - ライセンス: MIT（LICENSE は main に既存）
 
 ---
@@ -11,7 +11,7 @@
 ## 1. 目的
 
 Rails アプリが Kubernetes API を扱う際の**接続・CRD アクセス・障害処理の規約層**を
-gem（`kuberails`）として提供する。
+gem（`k8s-rails`）として提供する。
 
 起点となった実際の Rails アプリ実装には、公式 `kruby` クライアントを
 Rails アプリで実運用する過程で得られた知見が実装として固定されている:
@@ -31,7 +31,7 @@ K8s CRD を扱えるようにし、(b) 実際の consumer アプリをこの gem
 
 ### 2.1 本設計で扱うもの
 
-- gem `kuberails` のアーキテクチャ・公開 API の設計
+- gem `k8s-rails` のアーキテクチャ・公開 API の設計
 - 依存ポリシー（kruby pin、ActiveSupport の扱い）
 - 例外体系・障害時の挙動定義
 - テスト戦略（スタブによるユニットテスト、クラスタ不要）
@@ -60,14 +60,14 @@ K8s CRD を扱えるようにし、(b) 実際の consumer アプリをこの gem
 ```
 ┌────────────────────────────────────────────────────┐
 │ Rails アプリ（呼び出し側）                            │
-│  KubeRails.configure { |c| c.namespace = "app" }   │
-│  KubeRails.crd(group:, version:, plural:, kind:)   │
+│  K8sRails.configure { |c| c.namespace = "app" }   │
+│  K8sRails.crd(group:, version:, plural:, kind:)   │
 │                                                     │
 │  MyApp::Workflow.list / .find / .create / .patch    │
 └──────────────────────────┬─────────────────────────┘
-                           │ 例外: KubeRails::Unavailable / ::NotFound / ::ApiError
+                           │ 例外: K8sRails::Unavailable / ::NotFound / ::ApiError
 ┌──────────────────────────┴─────────────────────────┐
-│ kuberails（本 gem）                                  │
+│ k8s-rails（本 gem）                                  │
 │  ┌──────────────┐  ┌──────────────┐  ┌───────────┐ │
 │  │ Config        │  │ Client       │  │ CRD       │ │
 │  │ (initializer) │→ │ (接続解決+橋 │→ │ Resource  │ │
@@ -87,15 +87,15 @@ K8s CRD を扱えるようにし、(b) 実際の consumer アプリをこの gem
 データフローの原則:
 
 - 呼び出しアプリは kruby に**直接触れない**（例外はテスト用注入のみ）。
-  `KubeRails::Client` を挟むことで、kruby の API 変化・キー種別問題は gem 内部に封じ込める。
+  `K8sRails::Client` を挟むことで、kruby の API 変化・キー種別問題は gem 内部に封じ込める。
 - クラスタ未接続でも gem のロード・設定は**副作用なし**で完了する（lazy connect）。
   接続は最初の API 呼び出し時（§5.2）。
 
 ## 4. ディレクトリ構成（gem 本体）
 
 ```
-kuberails/
-├── kuberails.gemspec
+k8s-rails/
+├── k8s-rails.gemspec
 ├── Gemfile                  # gemspec 参照 + 開発依存 (rspec, rubocop)
 ├── Rakefile
 ├── README.md
@@ -103,17 +103,17 @@ kuberails/
 ├── docs/
 │   └── design.md            # 本設計書
 ├── lib/
-│   ├── kuberails.rb         # エントリ。require 集 + モジュール定義
-│   └── kuberails/
+│   ├── k8s-rails.rb         # エントリ。require 集 + モジュール定義
+│   └── k8s-rails/
 │       ├── version.rb       # VERSION = "0.1.0"
 │       ├── configuration.rb # Config: namespace, connection, 計測 ON/OFF
 │       ├── client.rb        # 接続解決・BearerToken 橋渡し・計測ラップ
-│       ├── crd.rb           # KubeRails.crd 宣言 → Resource 生成
+│       ├── crd.rb           # K8sRails.crd 宣言 → Resource 生成
 │       ├── resource.rb      # list/find/create/patch（生成先の基底クラス）
 │       └── errors.rb        # Unavailable / NotFound / ApiError
 ├── spec/
 │   ├── spec_helper.rb
-│   ├── kuberails_spec.rb    # 設定 / lazy connect
+│   ├── k8s-rails_spec.rb    # 設定 / lazy connect
 │   ├── client_spec.rb       # 橋渡し・計測・例外変換
 │   ├── crd_spec.rb          # 宣言 → メソッド生成
 │   └── resource_spec.rb     # list/find/create/patch の整形
@@ -126,8 +126,8 @@ kuberails/
 ### 5.1 設定
 
 ```ruby
-# config/initializers/kuberails.rb
-KubeRails.configure do |config|
+# config/initializers/k8s-rails.rb
+K8sRails.configure do |config|
   config.namespace = ENV.fetch("K8S_NAMESPACE", "default")
   # 任意上書き（省略時は default_config の自動検出: in-cluster → KUBECONFIG）
   # config.connection = Kubernetes::Configuration.default_config
@@ -144,14 +144,14 @@ end
 | `api_client` | `nil` | **テスト専用**: kruby の `CustomObjectsApi` と同型の 4 メソッド（`get_namespaced_custom_object` / `list_namespaced_custom_object` / `create_namespaced_custom_object` / `patch_namespaced_custom_object`）を実装する素のオブジェクト。指定時は `Client.build` が接続解決をスキープして `StringKeyedAdapter` で包んで使う（§5.2・§9） |
 | `instrumentation` | `true` | `ActiveSupport::Notifications` で計測する（§8） |
 
-- 設定は `KubeRails.configure` で**一度だけ**。再実行は警告（`Warning`）+ 無視。
-- `KubeRails.reset!`（テスト用）で接続キャッシュ・宣言済 CRD を破棄できる。
+- 設定は `K8sRails.configure` で**一度だけ**。再実行は警告（`Warning`）+ 無視。
+- `K8sRails.reset!`（テスト用）で接続キャッシュ・宣言済 CRD を破棄できる。
 
 ### 5.2 接続
 
 ```ruby
-KubeRails::Client.build   # → Kubernetes::CustomObjectsApi（lazy。初回呼び出し時に接続）
-KubeRails.connected?      # → 成功時は true。失敗は KubeRails::Unavailable / ApiError を raise
+K8sRails::Client.build   # → Kubernetes::CustomObjectsApi（lazy。初回呼び出し時に接続）
+K8sRails.connected?      # → 成功時は true。失敗は K8sRails::Unavailable / ApiError を raise
                           #   （false を返す経路なし）。/version 相当の軽量確認
                           #   （kruby 1.36.x の VersionApi#get_code（GET /version/）1 回）
 ```
@@ -161,19 +161,19 @@ KubeRails.connected?      # → 成功時は true。失敗は KubeRails::Unavail
 0. `config.api_client` があれば（テスト注入、§5.1）それを直接返し、以降の接続解決をスキップ
 1. `config.connection` があればそれ、なければ `Kubernetes::Configuration.default_config`
 2. **K1 橋渡し**: `api_key['authorization']` が `api_key['BearerToken']` に書かれていなければ複製
-3. `Kubernetes::ApiClient` → `Kubernetes::CustomObjectsApi` を生成し、**文字列キー化**（K2）を API レスポンス後に行う。ActiveSupport 非依存の gem 内部の純 Ruby 再帰変換（`KubeRails::Normalizer`）を使う（v0.1.1 以降: 常に Normalizer。`deep_stringify_keys` 経路は廃止）
-4. **接続レベルの失敗**（DNS 失敗 / タイムアウト / 接続拒否等）は `KubeRails::Unavailable` に変換して `raise`（リトライはしない）。**kruby 1.36.x ではこれらの転送失敗は HTTP ステータスが無いため `Kubernetes::ApiError`（`code == 0`）として surfacing する**（§5.4 の変換表参照）。認可失敗（401/403）は §5.4 により `KubeRails::ApiError`
+3. `Kubernetes::ApiClient` → `Kubernetes::CustomObjectsApi` を生成し、**文字列キー化**（K2）を API レスポンス後に行う。ActiveSupport 非依存の gem 内部の純 Ruby 再帰変換（`K8sRails::Normalizer`）を使う（v0.1.1 以降: 常に Normalizer。`deep_stringify_keys` 経路は廃止）
+4. **接続レベルの失敗**（DNS 失敗 / タイムアウト / 接続拒否等）は `K8sRails::Unavailable` に変換して `raise`（リトライはしない）。**kruby 1.36.x ではこれらの転送失敗は HTTP ステータスが無いため `Kubernetes::ApiError`（`code == 0`）として surfacing する**（§5.4 の変換表参照）。認可失敗（401/403）は §5.4 により `K8sRails::ApiError`
 
 ### 5.3 CRD 宣言
 
 ```ruby
-# config/initializers/kuberails_crd.rb（またはアプリケーションクラス内）
-Workflow = KubeRails.crd(
+# config/initializers/k8s-rails_crd.rb（またはアプリケーションクラス内）
+Workflow = K8sRails.crd(
   group:  "argoproj.io",
   version: "v1alpha1",
   plural: "workflows",
   kind:   "Workflow",
-  namespace: KubeRails.config.namespace,   # 省略可
+  namespace: K8sRails.config.namespace,   # 省略可
   readonly: false,                          # 既定 true。false で create/patch 有効化（K4）
 )
 ```
@@ -183,27 +183,27 @@ Workflow = KubeRails.crd(
 | メソッド | 引数 | 戻り値 | readonly 制限 |
 |---|---|---|---|
 | `list` | `{}` | `[{"name" => "...", "labels" => {}, "spec" => {}, "status" => {}}, ...]`（**文字列キー**） | 常に有効 |
-| `find(name)` | 必須 | 同型 or `KubeRails::NotFound`（raise） | 常に有効 |
+| `find(name)` | 必須 | 同型 or `K8sRails::NotFound`（raise） | 常に有効 |
 | `create(attributes)` | CRD body hash | 作成済みオブジェクト（文字列キー） | `readonly: false` のみ |
 | `patch(name, operations)` | JSON Patch 操作配列 | 更新済みオブジェクト | `readonly: false` のみ |
 
 - **戻り値は常に文字列キーの Hash**（K2 の規約を API 契約として固定）。
-  `find` は存在しない場合 `KubeRails::NotFound` を raise（consumer アプリ側が `return nil` にしていたのは
+  `find` は存在しない場合 `K8sRails::NotFound` を raise（consumer アプリ側が `return nil` にしていたのは
   呼び出し側の都合。gem としては例外が明示的）。「存在しない場合は nil」が欲しい場合は
   `find_or_nil(name)` を併設する。
 - `plural` / `kind` は自動推測しない（`workflows` / `Workflow` 等、推測が外れる CRD が多い）。
   宣言で必ず指定する（K5）。
-- 同名 CRD の再宣言は `KubeRails::RedeclarationError`（設定ミス検出）。
+- 同名 CRD の再宣言は `K8sRails::RedeclarationError`（設定ミス検出）。
 
 ### 5.4 例外体系（K3）
 
 ```ruby
-KubeRails::Error < StandardError
-├── KubeRails::Unavailable   # 接続不能・タイムアウト・DNS 失敗等（クラスタ起因）
-├── KubeRails::NotFound      # リソース不在（HTTP 404）
-├── KubeRails::ApiError      # その他の API エラー（401/403/409/422 等）。#code と #response を保持
-├── KubeRails::ReadOnlyError      # readonly: true 宣言で create/patch が呼ばれた（設定ミス）
-└── KubeRails::RedeclarationError # 同名 CRD の再宣言（設定ミス）
+K8sRails::Error < StandardError
+├── K8sRails::Unavailable   # 接続不能・タイムアウト・DNS 失敗等（クラスタ起因）
+├── K8sRails::NotFound      # リソース不在（HTTP 404）
+├── K8sRails::ApiError      # その他の API エラー（401/403/409/422 等）。#code と #response を保持
+├── K8sRails::ReadOnlyError      # readonly: true 宣言で create/patch が呼ばれた（設定ミス）
+└── K8sRails::RedeclarationError # 同名 CRD の再宣言（設定ミス）
 ```
 
 変換規則:
@@ -214,16 +214,16 @@ KubeRails::Error < StandardError
 | その他の `StandardError`（プログラミング/設定ミス、例: `NoMethodError`） | そのまま伝播（変換せず隠さない） |
 | `Kubernetes::ApiError` code 404 | `NotFound` |
 | `Kubernetes::ApiError` その他 | `ApiError`（code / response body を保持） |
-| 宣言時に `readonly: true` で create/patch を呼ばれた | `KubeRails::ReadOnlyError`（**設定ミス**なので raise せずには済ませない） |
+| 宣言時に `readonly: true` で create/patch を呼ばれた | `K8sRails::ReadOnlyError`（**設定ミス**なので raise せずには済ませない） |
 
 呼び出しアプリ（Rails）側の推奨パターン:
 
 ```ruby
 begin
   workflows = Workflow.list
-rescue KubeRails::Unavailable => e
+rescue K8sRails::Unavailable => e
   render "k8s_unavailable"        # consumer アプリの「K8s 未接続」バナー相当
-rescue KubeRails::NotFound
+rescue K8sRails::NotFound
   redirect_to root_path, alert: "Workflow が見つかりません"
 end
 ```
@@ -237,16 +237,16 @@ end
 | `activesupport` | **任意**（`>= 7.0`） | `defined?(ActiveSupport::Notifications)` でガード（計測のみ、§8）。Rails 無し環境（Cron スクリプト等）でも動作する必要がある — レスポンスの文字列キー化（K2）はこれに依存せず、gem 内部の純 Ruby 変換で担う（§5.2） |
 | `rspec` / `rubocop` | 開発依存 | spec / lint |
 
-- kruby への依存は **`KubeRails::Client` に閉じ込める**（§7）。
+- kruby への依存は **`K8sRails::Client` に閉じ込める**（§7）。
   kruby 上げ替え時の修正箇所を 1 ファイルに限定し、CHANGELOG に「対応 kruby」を明記する。
 
 ## 7. 実装規約（kruby 変化への耐性）
 
-- `lib/kuberails/client.rb` **のみ**が `require "kubernetes"` してよい。
+- `lib/k8s_rails/client.rb` **のみ**が `require "kubernetes"` してよい。
   他のファイルは kruby 定数・クラスを参照しない。
 - kruby の `CustomObjectsApi` メソッド呼び出しは `client.rb` 内の
   `*_namespaced_custom_object` の 4 メソッド（`get_namespaced_custom_object` 等）に集約する。`resource.rb` は
-  `KubeRails.client.get(group, version, ns, plural, name)` のような **gem 内部 API** だけを使う。
+  `K8sRails.client.get(group, version, ns, plural, name)` のような **gem 内部 API** だけを使う。
 - kruby 上げ替え時の作業は (1) client.rb 4 メソッドのシグネチャ確認、
   (2) K1 橋渡しの要否確認、に収まることをテスト（§9）で担保する。
 
@@ -255,7 +255,7 @@ end
 `instrumentation: true` かつ ActiveSupport 存在時、各 API 呼び出しを計測する:
 
 ```
-kuberails.request  payload: { operation: :list, group:, version:, plural:, namespace:
+k8s-rails.request  payload: { operation: :list, group:, version:, plural:, namespace:
                                # operation は symbol（:list / :find / :create / :patch）
                                duration_ms:  # float（ミリ秒・小数点 2 桁）
                                status: "ok" | "unavailable" | "api_error" }
@@ -274,8 +274,8 @@ kuberails.request  payload: { operation: :list, group:, version:, plural:, names
 
 | レイヤー | 手法 | 対象 |
 |---|---|---|
-| ユニット | `KubeRails.config.api_client` に**スタブ**（kruby `CustomObjectsApi` と同型の 4 メソッド `get_namespaced_custom_object` / `list_namespaced_custom_object` / `create_namespaced_custom_object` / `patch_namespaced_custom_object` を実装する素のオブジェクト。`StringKeyedAdapter` がこの形式を呼ぶ）を注入 | client（橋渡し・例外変換）、resource（整形・readonly 制限）、crd（メソッド生成） |
-| 設定 | spec 間で `KubeRails.reset!` | 宣言の破棄・再接続 |
+| ユニット | `K8sRails.config.api_client` に**スタブ**（kruby `CustomObjectsApi` と同型の 4 メソッド `get_namespaced_custom_object` / `list_namespaced_custom_object` / `create_namespaced_custom_object` / `patch_namespaced_custom_object` を実装する素のオブジェクト。`StringKeyedAdapter` がこの形式を呼ぶ）を注入 | client（橋渡し・例外変換）、resource（整形・readonly 制限）、crd（メソッド生成） |
+| 設定 | spec 間で `K8sRails.reset!` | 宣言の破棄・再接続 |
 | 集積（任意） | GitHub Actions で **kind**（または既存 microk8s に接続するジョブ）で実クラスタ E2E | v0.1 の必須ではない。**推奨**: consumer アプリ移行時の検証を兼ねる |
 
 - 本設計では CI は `rspec` + `rubocop` のみを必須とし、kind E2E は v0.2 以降で
@@ -285,7 +285,7 @@ kuberails.request  payload: { operation: :list, group:, version:, plural:, names
 
 | バージョン | 内容 | 出口基準 |
 |---|---|---|
-| **v0.1** | §5 の公開 API（CRD 宣言 / list / find / create / patch / 例外 / 計測 / スタブテスト）+ README | rspec 全緑 + **consumer アプリの K8s サービスを `kuberails` に移行して動作確認**（§12） |
+| **v0.1** | §5 の公開 API（CRD 宣言 / list / find / create / patch / 例外 / 計測 / スタブテスト）+ README | rspec 全緑 + **consumer アプリの K8s サービスを `k8s-rails` に移行して動作確認**（§12） |
 | v0.2 | watch（`watch` メソッド、kruby の watch サポート上）、core v1 built-in リソース対応（CustomObjects API では不可なため別途 core API 経路、§2.2）、kind E2E の CI 化 | v0.1 運用 1 ヶ月後のフィードバック |
 | v0.3 | （展望）複数クラスタ（ネームスペース化された client 集合）、リトライポリシー | — |
 
@@ -302,7 +302,7 @@ v0.1 の milestone 分割（開発セッション向けのタスク単位目安�
 - **watch**: kruby の watch はストリーム処理であり、Rails のリクエスト応答型には不向き。
   導入するなら「watch 開始 → メッセージをキュー / NotificationCenter 相当に流す」の
   形で、ポーリング置き換えのユースケース（consumer アプリの 30 秒ポーリング等）から設計する。
-- **複数クラスタ**: `KubeRails.cluster("prod") { ... }` のような名前付き client 集合。
+- **複数クラスタ**: `K8sRails.cluster("prod") { ... }` のような名前付き client 集合。
   現時点で需要がないため v0.1 では単一クラスタ。
 - **retries / timeout**: kruby の `Kubernetes::Configuration` には接続タイムアウトが
   設定できる。v0.1 は既定値 + README 記載のみで、gem 独自のバックオフは持たない
@@ -312,15 +312,15 @@ v0.1 の milestone 分割（開発セッション向けのタスク単位目安�
 
 ## 12. consumer アプリへの移行（v0.1 検証）
 
-実際の consumer Rails アプリの K8s サービス（kruby 直接利用）を `kuberails` に置き換えて動作を確認する:
+実際の consumer Rails アプリの K8s サービス（kruby 直接利用）を `k8s-rails` に置き換えて動作を確認する:
 
-1. `Gemfile` に `gem "kuberails", path: "../kuberails"`（開発期間限定。公開後は registry 版）
+1. `Gemfile` に `gem "k8s-rails", path: "../k8s-rails"`（開発期間限定。公開後は registry 版）
 2. initializer に CRD 宣言（Argo Workflows / CronWorkflow 等の該当 CRD、
    `readonly: false`（操作系があるため））
-3. K8s サービス内の kruby 呼び出しを `KubeRails` 経由に置換。**整形メソッド
+3. K8s サービス内の kruby 呼び出しを `K8sRails` 経由に置換。**整形メソッド
    （summary 系）は consumer アプリ側に残す**
    （アプリ固有の表示ロジックのため、gem には載せない）
-4. 例外: consumer アプリの Unavailable 相当を `KubeRails::Unavailable` に alias/
+4. 例外: consumer アプリの Unavailable 相当を `K8sRails::Unavailable` に alias/
    rescue 統一
 5. 検証: consumer アプリのテスト + K8s 読取が KUBECONFIG 経由で
    従来通り表示されること（実クラスタへの手動確認）
@@ -330,16 +330,16 @@ PR の差分を最小化）。
 
 ## 13. 命名・公開
 
-- **gem 名 / リポジトリ名: `kuberails`**（RubyGems で空きを確認済み 2026-09-15。
+- **gem 名 / リポジトリ名: `k8s-rails`**（RubyGems で空きを確認済み 2026-09-15。
   `kube-rails` は 2015 年の旧 gem が取得済みであり使用不可）
-- GitHub: `doridoridoriand/kuberails`（org `kuberails` は他者が使用済み。個人アカウント配下）
+- GitHub: `doridoridoriand/k8s-rails`（org `k8s-rails` は他者が使用済み。個人アカウント配下）
 - 公開は v0.1 完成後、**ローカル PC から手動 `gem push`**（kruby と同様の運用方針・
   2026-09-21 確定）。CI による自動公開は行わない。
   - 手順（owner がローカル PC で実施）:
     1. `bundle exec rake`（spec + rubocop）が全緑であることを確認
     2. CHANGELOG.md の該当バージョン節を確定（「Unreleased」のまま公開しない）
     3. `gem signin`（RubyGems アカウント・未作成なら先に作成）
-    4. `gem build kuberails.gemspec` → `gem push kuberails-<VERSION>.gem`
+    4. `gem build k8s-rails.gemspec` → `gem push k8s-rails-<VERSION>.gem`
   - 未取得の gem は**初回 push が所有権の取得**（`gem owner` は `--add` による
     **追加** owner のみで、位置引数に user を取る構文は存在しない・
     gem 4.0.7 `gem owner --help` で実測 2026-09-21）
@@ -370,7 +370,7 @@ PR の差分を最小化）。
 | 0.1.2 | 2026-09-18 | M1 実装にあたって kruby 1.36.2.1 を実機確認した差分を反映: `connected?` の endpoint を `VersionApi#get_code`（GET /version/）に修正、転送失敗（DNS/timeout/接続拒否）が `ApiError(code == 0)` として surfacing することを §5.2/§5.4 に明記、文字列キー化を常に `Normalizer`（`deep_stringify_keys` 経路廃止）に統一 | 実装反映済み |
 | 0.1.3 | 2026-09-20 | M3 実装に伴う §8 の軽微明確化: notification の `operation` は symbol・`status` は文字列であること、例外は発火後そのまま raise（swallow しない）こと、no-op 時（AS 無 / instrumentation: false）もブロック値がそのまま返ること。加えて `connected?` の戻り値記述を実装に合わせ修正（false を返す経路なし・失敗は raise）、テストスタブのメソッド名を kruby `CustomObjectsApi` 形式（`*_namespaced_custom_object`）に修正 | 実装反映済み |
 | 0.1.4 | 2026-09-21 | リリース準備（§13）: 公開導線を手動 `gem push` から**タグ基準の GitHub Actions**（`test.yml` / `publish.yml`）に更新、README に検証済み k8s サーババージョン（v1.33.x / microk8s v1.33.13）を追記、CHANGELOG.md を同梱、gemspec に `source_code_uri` / `changelog_uri` / `allowed_push_host` メタ情報を追加 | 実装反映済み |
-| 0.1.5 | 2026-09-21 | PR #11 レビュー対応（Codex P2 + Copilot M/L 3 系統）: ①未取得 gem の owner 取得手順を「初回 push が所有権取得」に修正（`gem owner kuberails <user>` は無効構文・`gem owner --help` 実測、`--add` は追加のみ）・publish.yml / §13 ②テスト CI を Ruby 3.3.x matrix に（**`>= 3.2` は kruby 1.36.x の `>= 3.3` と非整合だったため、§6・gemspec・README の Ruby 下限を 3.3 に改訂**・RubyGems API で 1.36.x 全 7 バージョン実測）③tag 前の CHANGELOG 確定を手順化（publish workflow は CHANGELOG を書き換えないため） | 実装反映済み |
+| 0.1.5 | 2026-09-21 | PR #11 レビュー対応（Codex P2 + Copilot M/L 3 系統）: ①未取得 gem の owner 取得手順を「初回 push が所有権取得」に修正（`gem owner k8s-rails <user>` は無効構文・`gem owner --help` 実測、`--add` は追加のみ）・publish.yml / §13 ②テスト CI を Ruby 3.3.x matrix に（**`>= 3.2` は kruby 1.36.x の `>= 3.3` と非整合だったため、§6・gemspec・README の Ruby 下限を 3.3 に改訂**・RubyGems API で 1.36.x 全 7 バージョン実測）③tag 前の CHANGELOG 確定を手順化（publish workflow は CHANGELOG を書き換えないため） | 実装反映済み |
 | 0.1.6 | 2026-09-21 | PR #11 レビュー第 2 波対応（Copilot ×2）: ①publish workflow に `verify` job（サポート Ruby 全バージョンの rake matrix）を追加し push job を `needs: verify` でゲート化（独立 Test workflow は tag 時に gem push をブロックできないため）・§13 ②テスト matrix の下限を 3.3.1 から **3.3.0** に（gemspec `>= 3.3` は 3.3.0 を含むため、宣言された最低バージョンを実際に検証） | 実装反映済み |
 | 0.1.7 | 2026-09-21 | PR #11 レビュー第 3 波対応（Copilot ×1）: `>= 3.3` が Ruby 3.4+ も含むため、テスト / verify matrix に **3.4.10（最新 stable・ruby-lang.org 実測）** を追加（3.3.0 / 3.3.8 / 3.4.10 の 3 系統）。新しい stable minor が出た際の matrix 追加を §13 に手順として明記 | 実装反映済み |
 | 0.1.8 | 2026-09-21 | PR #11 レビュー第 4 波対応（Copilot ×3）: 指摘（「Ruby 3.5 が stable 化したため matrix に追加せよ」）を検証した結果 **3.5 は preview であり claim は誤り**（ruby/ruby タグ `v3_5_0_preview1`・2026-09-21 実測）と判明。ただし指摘の根本（宣言と検証範囲のズレ）は**Ruby 4.0 が stable（v4.0.7）だったため**実際に存在した。対策として宣言範囲を **`>= 3.3, < 4.0` に改訂**（gemspec / §6 / README / CHANGELOG）し、宣言範囲 = matrix 検証範囲（3.3.0 / 3.3.8 / 3.4.10）を一致。4.0 / 3.5 対応は v0.2 以降で検証の上宣言に含める方針 | 実装反映済み |

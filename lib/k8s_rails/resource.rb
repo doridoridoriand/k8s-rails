@@ -1,21 +1,21 @@
 # frozen_string_literal: true
 
-module KubeRails
+module K8sRails
   # Base for generated CRD access classes (design §5.3).
   #
-  # A `KubeRails.crd` declaration returns a `Class.new(Resource)` with the
+  # A `K8sRails.crd` declaration returns a `Class.new(Resource)` with the
   # declared coordinates bound as class methods. All operations go through
-  # the shared transport (`KubeRails.client`), which handles kruby error
+  # the shared transport (`K8sRails.client`), which handles kruby error
   # conversion (K3) and response stringification (K2) — this class never
   # touches kruby itself (§7).
   #
-  #   Workflow = KubeRails.crd(group: "argoproj.io", version: "v1alpha1",
+  #   Workflow = K8sRails.crd(group: "argoproj.io", version: "v1alpha1",
   #                            plural: "workflows", kind: "Workflow")
   #   Workflow.list
   #   Workflow.find("wf-1")
   class Resource
     # Bind declared coordinates to a fresh anonymous subclass. `namespace`
-    # may be nil — resolved from `KubeRails.config.namespace` at call time.
+    # may be nil — resolved from `K8sRails.config.namespace` at call time.
     def self.declare(group:, version:, plural:, kind:, namespace: nil, readonly: true)
       Class.new(self) do
         define_singleton_method(:group_name) { group }
@@ -31,14 +31,14 @@ module KubeRails
       # All objects in the namespace. Returns an array of string-keyed Hashes
       # (design §5.3: `[{ "name" => "...", ... }]`).
       def list(namespace: resolved_namespace)
-        KubeRails.instrument(:list, instrument_meta(namespace)) do
+        K8sRails.instrument(:list, instrument_meta(namespace)) do
           transport.list(group_name, version_name, namespace, plural_name)["items"] || []
         end
       end
 
-      # One object by name. Raises KubeRails::NotFound when absent.
+      # One object by name. Raises K8sRails::NotFound when absent.
       def find(name, namespace: resolved_namespace)
-        KubeRails.instrument(:find, instrument_meta(namespace)) do
+        K8sRails.instrument(:find, instrument_meta(namespace)) do
           transport.get(group_name, version_name, namespace, plural_name, name)
         end
       end
@@ -51,10 +51,10 @@ module KubeRails
       end
 
       # Create from a CRD body hash. `readonly: true` declarations raise
-      # KubeRails::ReadOnlyError (K4).
+      # K8sRails::ReadOnlyError (K4).
       def create(attributes, namespace: resolved_namespace)
         assert_writable
-        KubeRails.instrument(:create, instrument_meta(namespace)) do
+        K8sRails.instrument(:create, instrument_meta(namespace)) do
           transport.create(group_name, version_name, namespace, plural_name, attributes)
         end
       end
@@ -62,26 +62,26 @@ module KubeRails
       # JSON Patch a named object. Same readonly restriction as `create`.
       def patch(name, operations, namespace: resolved_namespace)
         assert_writable
-        KubeRails.instrument(:patch, instrument_meta(namespace)) do
+        K8sRails.instrument(:patch, instrument_meta(namespace)) do
           transport.patch(group_name, version_name, namespace, plural_name, name, operations)
         end
       end
 
       private
 
-      # Notification metadata for design §8 (`kuberails.request`).
+      # Notification metadata for design §8 (`k8s-rails.request`).
       def instrument_meta(namespace)
         { group: group_name, version: version_name, plural: plural_name, namespace: }
       end
 
       # Declared namespace wins; otherwise the gem default (resolved at call
-      # time so `KubeRails.reset!` + reconfigure works in tests).
+      # time so `K8sRails.reset!` + reconfigure works in tests).
       def resolved_namespace
-        declared_namespace || KubeRails.config.namespace
+        declared_namespace || K8sRails.config.namespace
       end
 
       def transport
-        KubeRails.client
+        K8sRails.client
       end
 
       def assert_writable

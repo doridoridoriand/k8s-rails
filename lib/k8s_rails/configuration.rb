@@ -1,9 +1,9 @@
 # frozen_string_literal: true
 
-module KubeRails
-  # Settings held by `KubeRails.configure` (design §5.1).
+module K8sRails
+  # Settings held by `K8sRails.configure` (design §5.1).
   #
-  #   KubeRails.configure do |config|
+  #   K8sRails.configure do |config|
   #     config.namespace = ENV.fetch("K8S_NAMESPACE", "default")
   #   end
   #

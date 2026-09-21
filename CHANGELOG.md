@@ -1,6 +1,6 @@
 # Change Log
 
-`kuberails` の全 notable な変更はこのファイルに記録する。
+`k8s-rails` の全 notable な変更はこのファイルに記録する。
 
 ## 0.1.0
 

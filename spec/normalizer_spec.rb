@@ -2,7 +2,7 @@
 
 require "spec_helper"
 
-RSpec.describe KubeRails::Normalizer do
+RSpec.describe K8sRails::Normalizer do
   describe ".stringify" do
     it "converts a flat hash of symbol keys to string keys" do
       expect(described_class.stringify(name: "wf", ready: true)).to eq("name" => "wf", "ready" => true)

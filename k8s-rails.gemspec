@@ -1,18 +1,18 @@
 # frozen_string_literal: true
 
-require_relative "lib/kuberails/version"
+require_relative "lib/k8s_rails/version"
 
 Gem::Specification.new do |spec|
-  spec.name = "kuberails"
-  spec.version = KubeRails::VERSION
+  spec.name = "k8s-rails"
+  spec.version = K8sRails::VERSION
   spec.authors = ["Dorian - Takahiro Ishida"]
   spec.email = ["i.am.eager.for.peace@gmail.com"]
 
   spec.summary = "Kubernetes API / CRD convention layer for Rails applications"
   spec.description =
-    "kuberails provides the connection / CRD access / error-handling " \
+    "k8s-rails provides the connection / CRD access / error-handling " \
     "convention layer for Rails applications talking to the Kubernetes API, as a gem."
-  spec.homepage = "https://github.com/doridoridoriand/kuberails"
+  spec.homepage = "https://github.com/doridoridoriand/k8s-rails"
   spec.license = "MIT"
   # kruby 1.36.x は required_ruby_version ">= 3.3"（RubyGems API で実測 2026-09-21、
   # 1.36.0.1〜1.36.4.1 全バージョン）。実行時依存の下限に合わせる。
@@ -23,8 +23,8 @@ Gem::Specification.new do |spec|
   spec.required_ruby_version = [">= 3.3", "< 4.0"]
 
   # RubyGems.org ページに source / changelog リンクを表示させるためのメタ情報。
-  spec.metadata["source_code_uri"] = "https://github.com/doridoridoriand/kuberails"
-  spec.metadata["changelog_uri"] = "https://github.com/doridoridoriand/kuberails/blob/main/CHANGELOG.md"
+  spec.metadata["source_code_uri"] = "https://github.com/doridoridoriand/k8s-rails"
+  spec.metadata["changelog_uri"] = "https://github.com/doridoridoriand/k8s-rails/blob/main/CHANGELOG.md"
   spec.metadata["allowed_push_host"] = "https://rubygems.org"
 
   spec.files = Dir["lib/**/*.rb", "README.md", "LICENSE", "CHANGELOG.md", "docs/design.md"]

@@ -1,6 +1,6 @@
 # frozen_string_literal: true
 
-module KubeRails
+module K8sRails
   # Pure-Ruby deep key stringification for API responses (K2, design §5.2).
   #
   # kruby deserializes JSON into Hash/Array with SYMBOL keys. Our public API
