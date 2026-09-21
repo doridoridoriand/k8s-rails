@@ -1,16 +1,16 @@
 # frozen_string_literal: true
 
 require "spec_helper"
-# Resource itself never loads kruby, but the shared transport (KubeRails.client)
+# Resource itself never loads kruby, but the shared transport (K8sRails.client)
 # does — load it explicitly so specs are deterministic regardless of file order.
-require "kuberails/client"
+require "k8s_rails/client"
 
-RSpec.describe KubeRails::Resource do
+RSpec.describe K8sRails::Resource do
   before do
-    KubeRails.reset!
+    K8sRails.reset!
     @fake = RecordingTransport.new
-    KubeRails.config.api_client = @fake
-    @wf = KubeRails.crd(
+    K8sRails.config.api_client = @fake
+    @wf = K8sRails.crd(
       group: "argoproj.io",
       version: "v1alpha1",
       plural: "workflows",
@@ -35,9 +35,9 @@ RSpec.describe KubeRails::Resource do
       expect(@fake.calls).to eq([[:list, "argoproj.io", "v1alpha1", "team-b", "workflows"]])
     end
 
-    it "falls back to KubeRails.config.namespace when the declaration has none" do
-      KubeRails.config.namespace = "config-ns"
-      bare = KubeRails.crd(group: "g", version: "v1", plural: "p", kind: "Bare")
+    it "falls back to K8sRails.config.namespace when the declaration has none" do
+      K8sRails.config.namespace = "config-ns"
+      bare = K8sRails.crd(group: "g", version: "v1", plural: "p", kind: "Bare")
 
       bare.list
       expect(@fake.calls).to eq([[:list, "g", "v1", "config-ns", "p"]])
@@ -56,9 +56,9 @@ RSpec.describe KubeRails::Resource do
       expect(out).to eq("metadata" => { "name" => "wf-1" }, "spec" => { "a" => 1 })
     end
 
-    it "raises KubeRails::NotFound when the API returns 404" do
+    it "raises K8sRails::NotFound when the API returns 404" do
       @fake.raise_on_get = Kubernetes::ApiError.new(code: 404, response_body: '{"msg":"not found"}')
-      expect { @wf.find("missing") }.to raise_error(KubeRails::NotFound)
+      expect { @wf.find("missing") }.to raise_error(K8sRails::NotFound)
     end
   end
 
@@ -70,18 +70,18 @@ RSpec.describe KubeRails::Resource do
 
     it "still raises for other API errors (403)" do
       @fake.raise_on_get = Kubernetes::ApiError.new(code: 403, response_body: nil)
-      expect { @wf.find_or_nil("x") }.to raise_error(KubeRails::ApiError)
+      expect { @wf.find_or_nil("x") }.to raise_error(K8sRails::ApiError)
     end
   end
 
   describe ".create (K4 readonly gate)" do
     it "raises ReadOnlyError on a readonly: true declaration (the default)" do
-      expect { @wf.create({ metadata: { name: "wf" } }) }.to raise_error(KubeRails::ReadOnlyError, /readonly/)
+      expect { @wf.create({ metadata: { name: "wf" } }) }.to raise_error(K8sRails::ReadOnlyError, /readonly/)
       expect(@fake.calls).to be_empty
     end
 
     it "calls the transport on a readonly: false declaration" do
-      w = KubeRails.crd(group: "g", version: "v1", plural: "p", kind: "W", readonly: false)
+      w = K8sRails.crd(group: "g", version: "v1", plural: "p", kind: "W", readonly: false)
       out = w.create({ metadata: { name: "w-1" } })
 
       expect(@fake.calls).to eq([[:create, "g", "v1", "default", "p", { metadata: { name: "w-1" } }]])
@@ -92,12 +92,12 @@ RSpec.describe KubeRails::Resource do
   describe ".patch (K4 readonly gate)" do
     it "raises ReadOnlyError on a readonly: true declaration (the default)" do
       ops = [{ op: "replace", path: "/spec/a", value: 2 }]
-      expect { @wf.patch("wf-1", ops) }.to raise_error(KubeRails::ReadOnlyError, /readonly/)
+      expect { @wf.patch("wf-1", ops) }.to raise_error(K8sRails::ReadOnlyError, /readonly/)
       expect(@fake.calls).to be_empty
     end
 
     it "calls the transport on a readonly: false declaration" do
-      w = KubeRails.crd(group: "g", version: "v1", plural: "p", kind: "W", readonly: false)
+      w = K8sRails.crd(group: "g", version: "v1", plural: "p", kind: "W", readonly: false)
       ops = [{ op: "replace", path: "/spec/a", value: 2 }]
       out = w.patch("w-1", ops)
 

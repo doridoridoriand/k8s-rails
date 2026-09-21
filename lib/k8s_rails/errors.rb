@@ -1,9 +1,9 @@
 # frozen_string_literal: true
 
-module KubeRails
-  # Base class for all KubeRails errors (K3, design §5.4).
+module K8sRails
+  # Base class for all K8sRails errors (K3, design §5.4).
   #
-  # Apps rescue the specific subclass they care about, or `KubeRails::Error`
+  # Apps rescue the specific subclass they care about, or `K8sRails::Error`
   # to catch everything this gem raises. Errors that are NOT wrapped (e.g.
   # programming errors like NoMethodError) propagate raw on purpose — we never
   # mask a bug as a K8s problem.

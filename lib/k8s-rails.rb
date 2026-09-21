@@ -1,19 +1,19 @@
 # frozen_string_literal: true
 
-# KubeRails — Kubernetes API / CRD convention layer for Rails applications.
+# K8sRails — Kubernetes API / CRD convention layer for Rails applications.
 #
 # Design: docs/design.md (KBR-DESIGN-001)
 #
 # Load-time contract (§3 / §7): requiring this entry point has NO side effects
 # and does NOT load kruby. The kruby-dependent Client (and therefore kruby
-# itself) is loaded lazily on the first `KubeRails::Client.build` /
-# `KubeRails.connected?` call. This lets the gem be `require`d even when no
+# itself) is loaded lazily on the first `K8sRails::Client.build` /
+# `K8sRails.connected?` call. This lets the gem be `require`d even when no
 # cluster is reachable and keeps kruby's load cost out of app boot.
-module KubeRails
-  # Lazy load (§7): referencing KubeRails::Client (e.g. Client.build) is the
+module K8sRails
+  # Lazy load (§7): referencing K8sRails::Client (e.g. Client.build) is the
   # moment kruby is required — never at gem require time. Direct constant
-  # access works, while a plain `require "kuberails"` stays kruby-free.
-  autoload :Client, File.expand_path("kuberails/client", __dir__)
+  # access works, while a plain `require "k8s-rails"` stays kruby-free.
+  autoload :Client, File.expand_path("k8s_rails/client", __dir__)
 
   class << self
     # Settings, set once via `configure` (§5.1).
@@ -25,7 +25,7 @@ module KubeRails
     # (design §5.1). Yields the Configuration object.
     def configure
       if @configured
-        warn "[KubeRails] KubeRails.configure called more than once; ignoring the second call."
+        warn "[K8sRails] K8sRails.configure called more than once; ignoring the second call."
         return config
       end
 
@@ -55,16 +55,16 @@ module KubeRails
     end
 
     # Declare a CRD and return its Resource class (design §5.3, K5).
-    #   Workflow = KubeRails.crd(group: "argoproj.io", version: "v1alpha1",
+    #   Workflow = K8sRails.crd(group: "argoproj.io", version: "v1alpha1",
     #                            plural: "workflows", kind: "Workflow")
-    # Re-declaring the same kind raises KubeRails::RedeclarationError.
+    # Re-declaring the same kind raises K8sRails::RedeclarationError.
     def crd(group:, version:, plural:, kind:, namespace: nil, readonly: true)
       CRD.declare(group:, version:, plural:, kind:, namespace:, readonly:)
     end
 
-    # Design §8: run an API call inside a `kuberails.request` notification.
+    # Design §8: run an API call inside a `k8s-rails.request` notification.
     #
-    #   KubeRails.instrument(:list, group: "g", version: "v1", plural: "p", namespace: "ns") do
+    #   K8sRails.instrument(:list, group: "g", version: "v1", plural: "p", namespace: "ns") do
     #     # ... actual transport call ...
     #   end
     #
@@ -82,20 +82,20 @@ module KubeRails
       begin
         result = yield
         payload[:status] = "ok"
-      rescue KubeRails::Unavailable
+      rescue K8sRails::Unavailable
         payload[:status] = "unavailable"
         raise
-      rescue KubeRails::ApiError, KubeRails::NotFound
+      rescue K8sRails::ApiError, K8sRails::NotFound
         payload[:status] = "api_error"
         raise
       ensure
-        # Fallback for exceptions outside the KubeRails hierarchy (e.g. a
+        # Fallback for exceptions outside the K8sRails hierarchy (e.g. a
         # programming error like NoMethodError from a malformed stub): keep
         # the documented status enum (ok/unavailable/api_error) intact while
         # re-raising the original exception.
         payload[:status] ||= "api_error"
         payload[:duration_ms] = ((Process.clock_gettime(Process::CLOCK_MONOTONIC) - started) * 1_000).round(2)
-        ActiveSupport::Notifications.instrument("kuberails.request", payload)
+        ActiveSupport::Notifications.instrument("k8s-rails.request", payload)
       end
       result
     end
@@ -112,13 +112,13 @@ module KubeRails
   # (an autoloaded-but-unreferenced constant still counts as "not loaded"
   # for `defined?`/`const_defined?`, so $LOADED_FEATURES is authoritative).
   def self.client_loaded?
-    $LOADED_FEATURES.any? { |f| f.end_with?("kuberails/client.rb") }
+    $LOADED_FEATURES.any? { |f| f.end_with?("k8s_rails/client.rb") }
   end
 end
 
 # Pure-Ruby components with no kruby dependency — safe to load eagerly.
-require_relative "kuberails/version"
-require_relative "kuberails/errors"
-require_relative "kuberails/configuration"
-require_relative "kuberails/normalizer"
-require_relative "kuberails/crd"
+require_relative "k8s_rails/version"
+require_relative "k8s_rails/errors"
+require_relative "k8s_rails/configuration"
+require_relative "k8s_rails/normalizer"
+require_relative "k8s_rails/crd"

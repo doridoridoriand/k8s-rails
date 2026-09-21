@@ -2,7 +2,7 @@
 
 require "spec_helper"
 
-RSpec.describe KubeRails::Configuration do
+RSpec.describe K8sRails::Configuration do
   describe "defaults" do
     it "sets namespace to default" do
       expect(described_class.new.namespace).to eq("default")
