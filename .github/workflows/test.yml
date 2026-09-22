@@ -34,11 +34,22 @@ jobs:
         ruby: ["3.3.0", "3.3.8", "3.4.10", "3.5.0-preview1", "4.0.7"]
     steps:
       - uses: actions/checkout@v4
+      # 3.5.0-preview1 シェードのみの前処理: ffi のプリコンパイル platform
+      # gem には 3.5 preview 対応バイナリが存在しない（LoadError: cannot load
+      # such file -- 3.5/ffi_c）。ffi を source ビルドさせる（BUNDLE_FORCE_RUBY_PLATFORM）
+      # ために libffi-dev を保証する。
+      - name: Install libffi-dev (ffi source build for preview Ruby)
+        if: matrix.ruby == '3.5.0-preview1'
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq libffi-dev
       - name: Set up Ruby
         uses: ruby/setup-ruby@v1
         with:
           ruby-version: ${{ matrix.ruby }}
           bundler-cache: true
+        env:
+          # 3.5.0-preview1 のみ ruby platform（source ビルド）で ffi を組む。
+          # 他シェードは空（既定の platform gem 使用）。
+          BUNDLE_FORCE_RUBY_PLATFORM: ${{ matrix.ruby == '3.5.0-preview1' && '1' || '' }}
       - name: Run rspec + rubocop
         run: bundle exec rake
 # matrix は「宣言された下限（3.3.0 = kruby 1.36.x の required_ruby_version）」と
