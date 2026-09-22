@@ -310,11 +310,15 @@ class FakeTransport
 
   # A collection path ends at the plural; an object path has one more segment.
   # core (/api/{v}...) has 2 leading segments, named (/apis/{g}/{v}...) has 3.
+  # The cluster collection check must come first: /api/v1/namespaces
+  # (the Namespace resource itself) has the plural where a scope marker would.
   def collection_path?(path)
     parts = path.split("/").reject(&:empty?)
+    size = parts.size
     base = parts.first == "api" ? 2 : 3
-    depth = base + (parts.include?("namespaces") ? 2 : 0) + 1
-    parts.size == depth
+    return true if size == base + 1 # cluster collection (incl. /api/v1/namespaces)
+
+    parts[base] == "namespaces" && size == base + 3
   end
 end
 

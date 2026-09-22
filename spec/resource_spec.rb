@@ -162,6 +162,18 @@ RSpec.describe K8sRails::Resource do
       nodes.list_cluster
       expect(@fake.calls).to eq([[:GET, "/api/v1/nodes", nil]])
     end
+
+    it "lists the Namespace resource itself (cluster collection /api/v1/namespaces) as a list" do
+      namespace = K8sRails.crd(group: "", version: "v1", plural: "namespaces", kind: "Namespace", scope: :cluster)
+      out = namespace.list_cluster
+      expect(@fake.calls).to eq([[:GET, "/api/v1/namespaces", nil]])
+      # Regression: the plural "namespaces" sits where a scope marker would;
+      # the fake must still treat this as a cluster collection, not an object GET.
+      expect(out).to eq([
+                          { "name" => "wf-1", "labels" => { "team" => "a" }, "spec" => { "steps" => 1 },
+                            "status" => {} }
+                        ])
+    end
   end
 
   # --- Named built-in groups (apps/v1, etc.) ---------------------------------

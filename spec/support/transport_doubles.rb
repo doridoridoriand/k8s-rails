@@ -55,13 +55,18 @@ class RecordingTransport
     path.split("/").reject(&:empty?).last
   end
 
-  # A collection GET path ends at the plural; an object GET path has one extra
-  # name segment. Core paths start at /api/{version} (no group segment), named
-  # at /apis/{group}/{version}; namespaced paths add /namespaces/{ns}.
+  # A collection path ends at the plural; an object path has one extra name
+  # segment. Core paths start at /api/{version} (2 leading segments), named at
+  # /apis/{group}/{version} (3). The cluster collection check (size == base+1)
+  # MUST come first: the Namespace resource's cluster collection is
+  # /api/v1/namespaces, where the plural sits exactly where a scope marker
+  # would — position-based checks alone misclassify it.
   def collection_path?(path)
     parts = path.split("/").reject(&:empty?)
+    size = parts.size
     base = parts.first == "api" ? 2 : 3
-    depth = base + (parts.include?("namespaces") ? 2 : 0) + 1
-    parts.size == depth
+    return true if size == base + 1 # cluster collection (incl. /api/v1/namespaces)
+
+    parts[base] == "namespaces" && size == base + 3
   end
 end

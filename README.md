@@ -79,6 +79,7 @@ Deployment = K8sRails.crd(
   version: "v1",
   plural: "deployments",
   kind:   "Deployment",
+  readonly: false,       # enables create/patch/delete in the example below
 )
 ```
 
