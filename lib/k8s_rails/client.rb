@@ -4,25 +4,35 @@
 # 他のファイルは kruby の定数・クラスを参照しない。
 # Typhoeus は kruby が require するため転送層例外もここに閉じ込める。
 require "kubernetes"
+require "cgi"
 
 module K8sRails
-  # Resolves a connection to the Kubernetes API and exposes the four
-  # CustomObjects operations as a small internal transport (design §5.2 / §7).
+  # Resolves a connection to the Kubernetes API and exposes the read/write
+  # operations as a small internal REST transport (design §5.2 / §7).
   #
   #   api = K8sRails::Client.build
   #   api.list(group, version, namespace, plural)
   #   api.get(group, version, namespace, plural, name)
   #   api.create(group, version, namespace, plural, body)
   #   api.patch(group, version, namespace, plural, name, body)
+  #   api.delete(group, version, namespace, plural, name)
   #   # cluster-scoped (namespace argument omitted, design §5.3)
   #   api.list_cluster(group, version, plural)
   #   api.get_cluster(group, version, plural, name)
   #   api.create_cluster(group, version, plural, body)
   #   api.patch_cluster(group, version, plural, name, body)
+  #   api.delete_cluster(group, version, plural, name)
+  #
+  # The transport is a uniform REST layer over kruby's `Kubernetes::ApiClient`
+  # (`call_api`), NOT the `CustomObjectsApi`. A single path builder maps the
+  # declaration coordinates (group / version / scope / namespace / plural /
+  # name) onto the API path, so it reaches EVERY resource kruby can address:
+  # core v1 (`group: ""` → `/api/v1/...`), named built-in groups
+  # (`apps/v1` → `/apis/apps/v1/...`), and CRDs (`/apis/{group}/{version}/...`).
   #
   # Connection is LAZY: `build` does no network I/O — it only resolves a
-  # `Kubernetes::Configuration` and builds an in-memory `CustomObjectsApi`.
-  # The first real call is where DNS/timeout/TLS can fail.
+  # `Kubernetes::Configuration` and builds an in-memory `ApiClient`. The first
+  # real call is where DNS/timeout/TLS can fail.
   class Client
     class << self
       # Return the shared transport, building it on first call (lazy connect).
@@ -34,16 +44,15 @@ module K8sRails
       #   2. K1 bridge: duplicate `api_key['authorization']` into
       #      `api_key['BearerToken']` (kruby 1.36 in-cluster/KUBECONFIG write the
       #      token under 'authorization' but auth_settings reads 'BearerToken').
-      #   3. Build `ApiClient` → `CustomObjectsApi` (in-memory, no I/O).
+      #   3. Build `ApiClient` (in-memory, no I/O).
       #   4. Wrap in a StringKeyedAdapter that normalizes responses (K2) and
       #      converts kruby errors to K8sRails exceptions.
       def build
-        @build ||=
-          if (injected = K8sRails.config.api_client)
-            StringKeyedAdapter.new(injected)
-          else
-            StringKeyedAdapter.new(build_custom_objects_api)
-          end
+        @build ||= if (injected = K8sRails.config.api_client)
+                     StringKeyedAdapter.new(injected)
+                   else
+                     StringKeyedAdapter.new(build_api_client)
+                   end
       end
 
       # Lightweight connectivity probe (design §5.2). Performs one lightweight
@@ -95,12 +104,11 @@ module K8sRails
         kruby_error.message.to_s.sub(/\nHTTP status code:.*\z/, "").strip
       end
 
-      # Build a lazy in-memory CustomObjectsApi from the resolved configuration.
-      def build_custom_objects_api
+      # Build a lazy in-memory ApiClient from the resolved configuration.
+      def build_api_client
         config = build_configuration
         bridge_bearer_token(config)
-        api_client = Kubernetes::ApiClient.new(config)
-        Kubernetes::CustomObjectsApi.new(api_client)
+        Kubernetes::ApiClient.new(config)
       end
 
       def build_configuration
@@ -120,94 +128,112 @@ module K8sRails
       end
     end
 
-    # Wraps a CustomObjectsApi (or an injected test double) so that
+    # Wraps an ApiClient (or an injected test double) so that
     #   - every response is deep-stringified (K2), and
     #   - kruby errors are converted to K8sRails exceptions (K3).
     #
-    # The adapter is the ONLY place kruby response shapes / errors are touched,
-    # so a kruby upgrade is a one-file change (§7).
+    # This is the ONLY place kruby response shapes / errors are touched, so a
+    # kruby upgrade is a one-file change (§7). It speaks kruby's `call_api`
+    # protocol directly, so it reaches core v1, named built-in groups, and
+    # CRDs uniformly.
     class StringKeyedAdapter
       def initialize(transport)
         @transport = transport
       end
 
+      # --- namespaced ------------------------------------------------------
+
       def list(group, version, namespace, plural)
-        handle do
-          Normalizer.stringify(
-            @transport.list_namespaced_custom_object(group, version, namespace, plural)
-          )
-        end
+        request(:GET, build_path(:namespaced, group, version, namespace, plural))
       end
 
       def get(group, version, namespace, plural, name)
-        handle do
-          Normalizer.stringify(
-            @transport.get_namespaced_custom_object(group, version, namespace, plural, name)
-          )
-        end
+        request(:GET, build_path(:namespaced, group, version, namespace, plural, name))
       end
 
       def create(group, version, namespace, plural, body)
-        handle do
-          Normalizer.stringify(
-            @transport.create_namespaced_custom_object(group, version, namespace, plural, body)
-          )
-        end
+        request(:POST, build_path(:namespaced, group, version, namespace, plural), body: body)
       end
 
       def patch(group, version, namespace, plural, name, body)
-        handle do
-          Normalizer.stringify(
-            @transport.patch_namespaced_custom_object(group, version, namespace, plural, name, body)
-          )
-        end
+        request(
+          :PATCH,
+          build_path(:namespaced, group, version, namespace, plural, name),
+          body: body,
+          content_type: "application/json-patch+json"
+        )
       end
 
-      # Cluster-scoped variants (design §5.3): the same four operations on
-      # kruby's *_cluster_custom_object endpoints (no namespace in the path).
-      # An injected test double must implement both the *_namespaced_* and
-      # *_cluster_* quadruples.
+      def delete(group, version, namespace, plural, name)
+        request(:DELETE, build_path(:namespaced, group, version, namespace, plural, name))
+      end
+
+      # --- cluster-scoped --------------------------------------------------
 
       def list_cluster(group, version, plural)
-        handle do
-          Normalizer.stringify(
-            @transport.list_cluster_custom_object(group, version, plural)
-          )
-        end
+        request(:GET, build_path(:cluster, group, version, nil, plural))
       end
 
       def get_cluster(group, version, plural, name)
-        handle do
-          Normalizer.stringify(
-            @transport.get_cluster_custom_object(group, version, plural, name)
-          )
-        end
+        request(:GET, build_path(:cluster, group, version, nil, plural, name))
       end
 
       def create_cluster(group, version, plural, body)
-        handle do
-          Normalizer.stringify(
-            @transport.create_cluster_custom_object(group, version, plural, body)
-          )
-        end
+        request(:POST, build_path(:cluster, group, version, nil, plural), body: body)
       end
 
       def patch_cluster(group, version, plural, name, body)
-        handle do
-          Normalizer.stringify(
-            @transport.patch_cluster_custom_object(group, version, plural, name, body)
-          )
-        end
+        request(
+          :PATCH,
+          build_path(:cluster, group, version, nil, plural, name),
+          body: body,
+          content_type: "application/json-patch+json"
+        )
+      end
+
+      def delete_cluster(group, version, plural, name)
+        request(:DELETE, build_path(:cluster, group, version, nil, plural, name))
       end
 
       private
 
-      def handle
-        yield
+      # Map the declaration coordinates to the API path (mirrors kubectl's
+      # discovery-based routing):
+      #   - core (group == ""):   /api/v1[/namespaces/{ns}]/{plural}[/{name}]
+      #   - named (group != ""):  /apis/{group}/{version}[/namespaces/{ns}]/{plural}[/{name}]
+      # `scope` :namespaced takes a namespace; :cluster passes nil (no
+      # namespace in the path). `name` (when present) is CGI-escaped.
+      def build_path(scope, group, version, namespace, plural, name = nil)
+        prefix = group.to_s.empty? ? "/api/#{version}" : "/apis/#{group}/#{version}"
+        middle = scope == :cluster ? "" : "/namespaces/#{CGI.escape(namespace.to_s)}"
+        path = "#{prefix}#{middle}/#{CGI.escape(plural.to_s)}"
+        name.nil? ? path : "#{path}/#{CGI.escape(name.to_s)}"
+      end
+
+      # Issue one request through kruby's call_api and normalize the result.
+      # `return_type "Object"` makes kruby hand back the parsed JSON (symbol
+      # keys); the Normalizer deep-stringifies it (K2). kruby errors are
+      # converted to the K8sRails hierarchy (K3).
+      def request(method, path, body: nil, content_type: "application/json")
+        data, _status_code, _headers = @transport.call_api(method, path, call_opts(body, content_type))
+        Normalizer.stringify(data)
       rescue Kubernetes::ApiError => e
         raise Client.convert_api_error(e)
       rescue Kubernetes::ConfigError, Typhoeus::Errors::TyphoeusError => e
         raise Unavailable, "K8s に接続できません: #{e.message}"
+      end
+
+      # The kruby call_api options hash (mirrors how kruby's generated API
+      # methods assemble their request opts).
+      def call_opts(body, content_type)
+        {
+          operation: :k8s_rails_request,
+          header_params: { "Content-Type" => content_type },
+          query_params: {},
+          body: body,
+          auth_names: ["BearerToken"],
+          return_type: "Object"
+        }
       end
     end
 

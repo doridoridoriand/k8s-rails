@@ -101,13 +101,16 @@ RSpec.describe K8sRails do
 
     it "discards the cached transport so a later build re-resolves" do
       fake = Class.new do
-        def list_namespaced_custom_object(*)
-          { tag: "injected" }
+        def call_api(*)
+          [{ items: [{ tag: "injected" }], kind: "List" }, 200, {}]
         end
       end.new
       K8sRails.reset!
       K8sRails.config.api_client = fake
-      expect(K8sRails.client.list("g", "v", "n", "p")).to eq("tag" => "injected")
+      # client.list returns the stringified list envelope (Resource#list is
+      # what extracts ["items"]).
+      expect(K8sRails.client.list("g", "v", "n", "p"))
+        .to eq("items" => [{ "tag" => "injected" }], "kind" => "List")
 
       K8sRails.reset!
       expect(K8sRails.config.api_client).to be_nil

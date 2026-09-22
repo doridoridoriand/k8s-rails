@@ -69,11 +69,7 @@ RSpec.describe "K8sRails.instrument" do
   it "falls back to status api_error for exceptions outside the K8sRails hierarchy" do
     K8sRails.config.instrumentation = true
     bad = Class.new do
-      def list_namespaced_custom_object(*) = raise NoMethodError, "malformed stub"
-
-      def get_namespaced_custom_object(*) = {}
-      def create_namespaced_custom_object(*) = {}
-      def patch_namespaced_custom_object(*) = {}
+      def call_api(*) = raise NoMethodError, "malformed stub"
     end.new
     K8sRails.config.api_client = bad
     wf = declare
@@ -102,15 +98,28 @@ RSpec.describe "K8sRails.instrument" do
     expect(@events).to be_empty
   end
 
-  it "wraps create/patch calls with the operation name" do
+  it "wraps create/patch/delete calls with the operation name" do
     K8sRails.config.instrumentation = true
     writable = K8sRails.crd(group: "g", version: "v1", plural: "p", kind: "W",
                             namespace: "default", readonly: false)
 
     writable.create({ metadata: { name: "w" } })
     writable.patch("w", [{ "op" => "replace", "path" => "/spec/a", "value" => 1 }])
+    writable.delete("w")
 
-    expect(@events.map { |e| e[1][:operation] }).to eq(%i[create patch])
+    expect(@events.map { |e| e[1][:operation] }).to eq(%i[create patch delete])
     expect(@events.all? { |e| e[1][:status] == "ok" }).to be(true)
+  end
+
+  it "wraps delete_cluster calls with the operation name" do
+    K8sRails.config.instrumentation = true
+    cluster_writable = K8sRails.crd(group: "g", version: "v1", plural: "c", kind: "C",
+                                    scope: :cluster, readonly: false)
+
+    cluster_writable.delete_cluster("c-1")
+
+    expect(@events.map { |e| e[1][:operation] }).to eq(%i[delete])
+    expect(@events.first[1][:namespace]).to be_nil
+    expect(@events.first[1][:status]).to eq("ok")
   end
 end
