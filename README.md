@@ -30,7 +30,7 @@ gem "k8s-rails", "~> 0.3"
 
 ```ruby
 require "k8s-rails"
-K8sRails::VERSION # => "0.3.0"
+K8sRails::VERSION # => "0.3.1"
 ```
 
 `require` is side-effect-free and needs no cluster. kruby itself is loaded

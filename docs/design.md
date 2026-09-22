@@ -1,8 +1,8 @@
 # k8s-rails 設計書
 
 - 文書番号: KBR-DESIGN-001
-- 版: 0.1.15（案）
-- 日付: 2026-09-15
+- 版: 0.1.16（案）
+- 日付: 2026-09-22
 - 対象リポジトリ: k8s-rails（本設計の実装先）
 - ライセンス: MIT（LICENSE は main に既存）
 
@@ -106,7 +106,7 @@ k8s-rails/
 ├── lib/
 │   ├── k8s-rails.rb         # エントリ。require 集 + モジュール定義
 │   └── k8s_rails/
-│       ├── version.rb       # VERSION = "0.3.0"
+│       ├── version.rb       # VERSION = "0.3.1"
 │       ├── configuration.rb # Config: namespace, connection, 計測 ON/OFF
 │       ├── client.rb        # 接続解決・BearerToken 橋渡し・計測ラップ
 │       ├── crd.rb           # K8sRails.crd 宣言 → Resource 生成
@@ -460,3 +460,4 @@ PR の差分を最小化）。
 | 0.1.13 | 2026-09-22 | v0.2.1 リリース準備 — Ruby 対応範囲の拡大・検証: ①Ruby 4.0.7（stable・v4.0.7）上で全 rspec / rubocop を実行し動作確認（kruby 1.36.4.1 の install / 動作を含む）②宣言範囲を **`>= 3.3, < 4.1`** に拡大（gemspec / §6 / README / test.yml）。上限は「宣言した minor を必ず CI で検証する」方針で検証済みの 4.0 系に設定（`< 5.0` 等未検証 minor を区間で挟み込む形は RubyGems が集合和を表現できないため不採用・§13 に明記）③RubyGems は `3.5.0-preview1` を範囲内に満たすため 3.5 も実際に対応・検証（3.5.0-preview1 で全 suite / rubocop 緑確認）。matrix は 3.3.0 / 3.3.8 / 3.4.10 / 3.5.0-preview1 / 4.0.7 の 5 系統で範囲内公開済み Ruby を全カバー（§13） | 実装反映済み |
 | 0.1.14 | 2026-09-22 | **対応リソースの拡大: unified REST transport 導入で core v1 built-in（Pod / Service / ConfigMap / Node 等）に対応**（旧 `CustomObjectsApi` 経路では `group: ""` が 404 だった唯一のギャップ。named built-in は従来から動作）。①transport を `Kubernetes::ApiClient#call_api` 上の統一 REST 層に改訂（`client.rb`。パス構築: core `/api/v1/...` / named `/apis/{group}/{version}/...`・CGI escape・json-patch Content-Type 維持）②`delete` / `delete_cluster` を追加（CRUD 完成。readonly ゲート同型。Status オブジェクトを文字列キーで返す）③テスト注入スタブの契約を `call_api` の 1 メソッドに統一（§5.1 表 / configuration.rb コメント / §9）④実クラスタ（v1.33.13）で Pod list / Deployment find / ConfigMap create・patch・delete / Node list_cluster を E2E 検証 | 実装反映済み |
 | 0.1.15 | 2026-09-22 | v0.3.0 リリース準備: ①`VERSION` を 0.2.1 → **0.3.0**（version.rb + version spec）②CHANGELOG の `Unreleased` を **0.3.0** に確定③README の install pin（`~> 0.2` → `~> 0.3`）・`VERSION` 例・Roadmap 見出し（v0.3+ → v0.4+）を同期④§10 リリース計画表で v0.3 行を「実際にリリースした内容」に書き換え（unified REST transport / delete / README 改稿）、旧 v0.3 予定内容（watch / kind E2E / matrix 追加）を v0.4 へ、リトライポリシーを v0.4 へ、複数クラスタ展望を v0.5 へ移動⑤§2.2 / §9 / §13 の旧「v0.3 対象」参照を v0.4 に修正 | 実装反映済み |
+| 0.1.16 | 2026-09-22 | v0.3.1 リリース準備: gemspec の `summary` / `description` 文言更新（PR #25）を**公開 gem として反映するための docs みのパッチリリース**。公開済み gem の文言は公開後に変更できない（RubyGems に gem メタの編集 API / UI なし）ため、0.3.1 の公開で RubyGems ページ表示が新文言に切り替わる。①`VERSION` を 0.3.0 → **0.3.1**（version.rb + version spec）②CHANGELOG に 0.3.1 セクション追加③README の `VERSION` 例・§3 ツリーコメントを同期。**コード・挙動の変更なし** | 実装反映済み |
