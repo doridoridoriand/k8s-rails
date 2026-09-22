@@ -1,7 +1,7 @@
 # k8s-rails 設計書
 
 - 文書番号: KBR-DESIGN-001
-- 版: 0.1.13（案）
+- 版: 0.1.14（案）
 - 日付: 2026-09-15
 - 対象リポジトリ: k8s-rails（本設計の実装先）
 - ライセンス: MIT（LICENSE は main に既存）
@@ -40,7 +40,7 @@ K8s CRD を扱えるようにし、(b) 実際の consumer アプリをこの gem
 
 ### 2.2 非スコープ（本設計の外）
 
-- core v1 リソース（Pod / Deployment / Service 等）のフルサポート — CRD 中心の gem。core v1 は built-in リソースであり CustomObjects API では扱えない（`group=""`/`version="v1"` の宣言は**無効**）ため、別途 core API 経路が必要。v0.1 では対象外（将来候補、§11）
+- **core v1 リソースの CustomObjects 経路でのアクセス** — 2026-09-22 に**解消済み**（unified REST transport 導入、§5.2 改訂）。以前は core v1（Pod / Service / ConfigMap / Node 等）が `/api/v1/...`（group 区間なし）のため `CustomObjectsApi` では扱えず、`group: ""` 宣言は 404 になった。**named-group の built-in（apps/v1 の Deployment 等）は CustomObjects 経路でも動作していた**（generic な `/apis/{group}/...` クライアントのため）。現在の transport は `Kubernetes::ApiClient#call_api` 上の統一 REST 層で、core v1（`group: ""` → `/api/v1/...`）・named built-in・CRD を 1 つの経路で扱う
 - **watch（ストリーム）** — v0.1 では非対応。kruby の watch は get/list より成熟度が低く、初版の API 保証範囲から外す（§10 で v0.3 対象）
 - アプリの**デプロイ**（helm / kustomize 生成等） — `kuby-core` の領域
 - RBAC 権限の付与・管理 — 呼び出しアプリ側の ClusterRole/Role の責務
@@ -143,7 +143,7 @@ end
 |---|---|---|
 | `namespace` | `"default"` | CRD 宣言が namespace 未指定時のデフォルト |
 | `connection` | `nil`（自動検出） | `Kubernetes::Configuration` インスタンス。認証を上書きする場合に指定。省略時の探索順序（kruby 1.36.x の loader 実装順）: **KUBECONFIG → `~/.kube/config` → in-cluster**（in-cluster はファイル系が両方無効な場合の**最後**。kruby 上げ替え時に loader を再確認すること — §7） |
-| `api_client` | `nil` | **テスト専用**: kruby の `CustomObjectsApi` と同型のメソッド（namespaced 4 メソッド `get_namespaced_custom_object` / `list_namespaced_custom_object` / `create_namespaced_custom_object` / `patch_namespaced_custom_object` ＋ cluster 4 メソッド `get_cluster_custom_object` / `list_cluster_custom_object` / `create_cluster_custom_object` / `patch_cluster_custom_object`）を実装する素のオブジェクト（namespaced 宣言のみを使う場合は namespaced 4 メソッドで足りる）。指定時は `Client.build` が接続解決をスキープして `StringKeyedAdapter` で包んで使う（§5.2・§9） |
+| `api_client` | `nil` | **テスト専用**: kruby の `Kubernetes::ApiClient#call_api` と同型の 1 メソッド `call_api(http_method, path, opts)`（戻り値 `[data, status_code, headers]`。`http_method` は `:GET` / `:POST` / `:PATCH` / `:DELETE`、`path` は宣言の座標から構築された REST パス）を実装する素のオブジェクト。指定時は `Client.build` が接続解決をスキープして `StringKeyedAdapter` で包んで使う（§5.2・§9） |
 | `instrumentation` | `true` | `ActiveSupport::Notifications` で計測する（§8） |
 
 - 設定は `K8sRails.configure` で**一度だけ**。再実行は警告（`Warning`）+ 無視。
@@ -159,7 +159,7 @@ end
 ### 5.2 接続
 
 ```ruby
-K8sRails::Client.build   # → Kubernetes::CustomObjectsApi（lazy。初回呼び出し時に接続）
+K8sRails::Client.build   # → 統一 REST transport（kruby ApiClient を包む。lazy。初回呼び出し時に接続）
 K8sRails.connected?      # → 成功時は true。失敗は K8sRails::Unavailable / ApiError を raise
                           #   （false を返す経路なし）。/version 相当の軽量確認
                           #   （kruby 1.36.x の VersionApi#get_code（GET /version/）1 回）
@@ -167,33 +167,55 @@ K8sRails.connected?      # → 成功時は true。失敗は K8sRails::Unavailab
                           #   注入が接続面そのものだから。Resource 操作と整合させる）
 ```
 
-`Client.build` が内部で行うこと（consumer アプリの K8s サービスの custom objects 生成部を移設）:
+`Client.build` が内部で行うこと（2026-09-22 に unified REST transport に改訂 —
+旧実装は `CustomObjectsApi` 経由で CRD / named-group のみ、core v1 は 404）:
 
 0. `config.api_client` があれば（テスト注入、§5.1）それを直接返し、以降の接続解決をスキップ
 1. `config.connection` があればそれ、なければ `Kubernetes::Configuration.default_config`
 2. **K1 橋渡し**: `api_key['authorization']` が `api_key['BearerToken']` に書かれていなければ複製
-3. `Kubernetes::ApiClient` → `Kubernetes::CustomObjectsApi` を生成し、**文字列キー化**（K2）を API レスポンス後に行う。ActiveSupport 非依存の gem 内部の純 Ruby 再帰変換（`K8sRails::Normalizer`）を使う（v0.1.1 以降: 常に Normalizer。`deep_stringify_keys` 経路は廃止）
+3. `Kubernetes::ApiClient` を生成し、`StringKeyedAdapter` で包む。**パス構築**: 宣言の座標から REST パスを構築して `call_api` で実行 — core v1（`group == ""`）は `/api/{version}[/namespaces/{ns}]/{plural}[/{name}]`、named（CRD・named built-in）は `/apis/{group}/{version}[/namespaces/{ns}]/{plural}[/{name}]`。`return_type: "Object"` で kruby が JSON をパース（symbol キー）したオブジェクトを返し、**文字列キー化**（K2）を API レスポンス後に行う（`K8sRails::Normalizer`、ActiveSupport 非依存）
 4. **接続レベルの失敗**（DNS 失敗 / タイムアウト / 接続拒否等）は `K8sRails::Unavailable` に変換して `raise`（リトライはしない）。**kruby 1.36.x ではこれらの転送失敗は HTTP ステータスが無いため `Kubernetes::ApiError`（`code == 0`）として surfacing する**（§5.4 の変換表参照）。認可失敗（401/403）は §5.4 により `K8sRails::ApiError`
+
+**対応リソース**: kruby が到達できる全リソースを 1 つの経路で扱う —
+- core v1 built-in（Pod / Service / ConfigMap / Node 等）: `group: ""`
+- named-group built-in（Deployment = `apps` / Ingress = `networking.k8s.io` 等）: 各 API group（**旧実装の `CustomObjectsApi` 経路でもこれらは `/apis/{group}/...` generic クライアントとして動作していた**）
+- CRD: 各 CRD の group
 
 `connected?` の解決順序:
 
 0. `config.api_client` があれば（テスト注入、§5.1）**I/O なしで `true` を返す**。注入されたトランスポートが接続面そのもののため、実エンドポイントへのプローブは同一注入下の Resource 操作と矛盾する（#18 対応）。クラスタ到達性の真の確認が必要な場合は注入を解除した環境で行う
 1. 以下 `Client.build` と同一（`config.connection` → `default_config` → K1 橋渡し → VersionApi プローブ）
 
-### 5.3 CRD 宣言
+### 5.3 リソース宣言（CRD / built-in 共通）
+
+`K8sRails.crd` は core v1 built-in・named built-in・CRD の全てに同一の API（2026-09-22 の unified REST transport 導入で core v1 が有効化）:
 
 ```ruby
 # config/initializers/k8s-rails_crd.rb（またはアプリケーションクラス内）
+# core v1 built-in（group が空文字）
+Pod = K8sRails.crd(
+  group:  "",              # core v1（/api/v1 経路）
+  version: "v1",
+  plural: "pods",
+  kind:   "Pod",
+  namespace: K8sRails.config.namespace,   # 省略可
+  readonly: false,                          # 既定 true。false で create/patch/delete 有効化（K4）
+)
+
+# named-group built-in（apps/v1 の Deployment 等）も同形
+Deployment = K8sRails.crd(group: "apps", version: "v1", plural: "deployments", kind: "Deployment")
+
+# CRD（従来の形・不変）
 Workflow = K8sRails.crd(
   group:  "argoproj.io",
   version: "v1alpha1",
   plural: "workflows",
   kind:   "Workflow",
   namespace: K8sRails.config.namespace,   # 省略可
-  readonly: false,                          # 既定 true。false で create/patch 有効化（K4）
+  readonly: false,                          # 既定 true。false で create/patch/delete 有効化（K4）
 )
 
-# cluster-scoped CRD（ClusterIssuer / ClusterWorkflowTemplate 等）は
+# cluster-scoped（ClusterIssuer / Node / ClusterWorkflowTemplate 等）は
 # scope: :cluster を付け、namespace: は省略する（併用は ArgumentError）
 ClusterIssuer = K8sRails.crd(
   group:  "cert-manager.io",
@@ -210,19 +232,21 @@ ClusterIssuer = K8sRails.crd(
 |---|---|---|---|
 | `list` | `{}` | `[{"name" => "...", "labels" => {}, "spec" => {}, "status" => {}}, ...]`（**文字列キー**） | 常に有効 |
 | `find(name)` | 必須 | 同型 or `K8sRails::NotFound`（raise） | 常に有効 |
-| `create(attributes)` | CRD body hash | 作成済みオブジェクト（文字列キー） | `readonly: false` のみ |
+| `create(attributes)` | body hash | 作成済みオブジェクト（文字列キー） | `readonly: false` のみ |
 | `patch(name, operations)` | JSON Patch 操作配列 | 更新済みオブジェクト | `readonly: false` のみ |
+| `delete(name)` | 必須 | API の Status オブジェクト（文字列キー。`{"kind" => "Status", "status" => "Success", ...}`） | `readonly: false` のみ |
 | `list_cluster` | `{}` | 同上（クラスタ横断。`namespace:` なし） | 常に有効 |
 | `find_cluster(name)` | 必須 | 同上 or `K8sRails::NotFound` | 常に有効 |
-| `create_cluster(attributes)` | CRD body hash | 作成済みオブジェクト | `readonly: false` のみ |
+| `create_cluster(attributes)` | body hash | 作成済みオブジェクト | `readonly: false` のみ |
 | `patch_cluster(name, operations)` | JSON Patch 操作配列 | 更新済みオブジェクト | `readonly: false` のみ |
+| `delete_cluster(name)` | 必須 | API の Status オブジェクト（文字列キー） | `readonly: false` のみ |
 
 スコープの契約（#17 対応）:
 
 - `scope: :namespaced`（既定）の宣言では `*_cluster` メソッドは `ArgumentError`（CRD が namespaced のためクラスタ endpoint を呼んでも 404 になるだけ）。
 - `scope: :cluster` の宣言では素の `list` / `find` / `create` / `patch` は `ArgumentError`（namespaced endpoint を呼ぶと 404 になるだけ。`namespace:` 引数は意味を持たない）。
 - 宣言時に `scope: :cluster` と `namespace:` を併用した場合は `ArgumentError`（設定ミスの fail fast）。
-- transport は kruby の `*_cluster_custom_object` 4 メソッド（`namespace` 非持参の endpoint）を使う。テスト注入スタブは 2 セット 8 メソッドを実装する（§9）。
+- transport は kruby の `ApiClient#call_api` 上の統一 REST 層で、namespaced / cluster の区別はパス構築（`/namespaces/{ns}` の有無）のみ。テスト注入スタブは `call_api` の 1 メソッドを実装する（§9）。
 
 - **戻り値は常に文字列キーの Hash**（K2 の規約を API 契約として固定）。
   `find` は存在しない場合 `K8sRails::NotFound` を raise（consumer アプリ側が `return nil` にしていたのは
@@ -239,7 +263,7 @@ K8sRails::Error < StandardError
 ├── K8sRails::Unavailable   # 接続不能・タイムアウト・DNS 失敗等（クラスタ起因）
 ├── K8sRails::NotFound      # リソース不在（HTTP 404）
 ├── K8sRails::ApiError      # その他の API エラー（401/403/409/422 等）。#code と #response を保持
-├── K8sRails::ReadOnlyError      # readonly: true 宣言で create/patch が呼ばれた（設定ミス）
+├── K8sRails::ReadOnlyError      # readonly: true 宣言で create/patch/delete が呼ばれた（設定ミス）
 └── K8sRails::RedeclarationError # 同名 CRD の再宣言（設定ミス）
 ```
 
@@ -251,7 +275,7 @@ K8sRails::Error < StandardError
 | その他の `StandardError`（プログラミング/設定ミス、例: `NoMethodError`） | そのまま伝播（変換せず隠さない） |
 | `Kubernetes::ApiError` code 404 | `NotFound` |
 | `Kubernetes::ApiError` その他 | `ApiError`（code / response body を保持） |
-| 宣言時に `readonly: true` で create/patch を呼ばれた | `K8sRails::ReadOnlyError`（**設定ミス**なので raise せずには済ませない） |
+| 宣言時に `readonly: true` で create/patch/delete を呼ばれた | `K8sRails::ReadOnlyError`（**設定ミス**なので raise せずには済ませない） |
 
 呼び出しアプリ（Rails）側の推奨パターン:
 
@@ -270,7 +294,7 @@ end
 | 依存 | 制約 | 理由 |
 |---|---|---|
 | Ruby | `>= 3.3, < 4.1` | 下限: kruby 1.36.x が `required_ruby_version ">= 3.3"` を宣言（RubyGems API で実測 2026-09-21、1.36.0.1〜1.36.4.1 全バージョン）。上限: 「宣言した minor を必ず CI で検証する」方針 — 2026-09-22 に Ruby 4.0.7（stable）と Ruby 3.5.0-preview1（3.5 系で公開済みの唯一のリリース）で全 suite / rubocop を実行し緑を確認（matrix に 4.0.7 / 3.5.0-preview1 追加・v0.2.1）。この範囲で公開済みの Ruby は 3.3.x / 3.4.x / 3.5.0-preview1 / 4.0.x のみ（ruby/ruby タグ実測・4.1 系リリースなし）のため宣言範囲 = 検証範囲。RubyGems は version requirement で集合和を表現できないため未検証 minor を区間で挟み込む形（`< 5.0` 等）は取らない。3.5 stable / 4.1 系がリリースされたら matrix を追加して検証（§10 / §13） |
-| `kruby` | `~> 1.36.0` | consumer アプリと同一 pin。`~> 1.36.0` は 1.36.x のみ許可（`~> 1.36` 形式は 1.37 以降も許容してしまうため使用しない）。新しめの kruby に対応する場合は §7 の確認事項（client.rb 8 メソッド（namespaced 4 + cluster 4）・K1 橋渡し・`default_config` 探索順序）を済ませてから明示的に上げ替える |
+| `kruby` | `~> 1.36.0` | consumer アプリと同一 pin。`~> 1.36.0` は 1.36.x のみ許可（`~> 1.36` 形式は 1.37 以降も許容してしまうため使用しない）。新しめの kruby に対応する場合は §7 の確認事項（client.rb の `call_api` 依存箇所・K1 橋渡し・`default_config` 探索順序）を済ませてから明示的に上げ替える |
 | `activesupport` | **任意**（`>= 7.0`） | `defined?(ActiveSupport::Notifications)` でガード（計測のみ、§8）。Rails 無し環境（Cron スクリプト等）でも動作する必要がある — レスポンスの文字列キー化（K2）はこれに依存せず、gem 内部の純 Ruby 変換で担う（§5.2） |
 | `rspec` / `rubocop` | 開発依存 | spec / lint |
 
@@ -281,13 +305,14 @@ end
 
 - `lib/k8s_rails/client.rb` **のみ**が `require "kubernetes"` してよい。
   他のファイルは kruby 定数・クラスを参照しない。
-- kruby の `CustomObjectsApi` メソッド呼び出しは `client.rb` 内の
-  `*_namespaced_custom_object` の 4 メソッド（`get_namespaced_custom_object` 等）と
-  `*_cluster_custom_object` の 4 メソッド（`get_cluster_custom_object` 等）に集約する。
+- kruby の API 呼び出しは `client.rb` 内の `Kubernetes::ApiClient#call_api`
+  1 メソッドに集約する（unified REST transport。パスは `build_path` が宣言の
+  座標から構築 — core v1 は `/api/{version}...`、named は `/apis/{group}/{version}...`）。
   `resource.rb` は
   `K8sRails.client.get(group, version, ns, plural, name)` のような **gem 内部 API** だけを使う。
-- kruby 上げ替え時の作業は (1) client.rb 8 メソッド（namespaced 4 + cluster 4）のシグネチャ確認、
-  (2) K1 橋渡しの要否確認、(3) **`Kubernetes::Configuration.default_config` の探索順序確認**
+- kruby 上げ替え時の作業は (1) `ApiClient#call_api` のシグネチャ・`opts` 形式（header_params /
+  query_params / body / auth_names / return_type）の確認、(2) K1 橋渡しの要否確認、
+  (3) **`Kubernetes::Configuration.default_config` の探索順序確認**
   （kruby 1.36.x の loader 実装順は **KUBECONFIG → `~/.kube/config` → in-cluster** で in-cluster が
   最後。README / 設計書 / 設定コメントがこの順序を明記しているため、loader が変わった場合は
   全箇所を同期する — #19 対応）に収まることをテスト（§9）で担保する。
@@ -298,7 +323,7 @@ end
 
 ```
 k8s-rails.request  payload: { operation: :list, group:, version:, plural:, namespace:
-                               # operation は symbol（:list / :find / :create / :patch）
+                               # operation は symbol（:list / :find / :create / :patch / :delete）
                                duration_ms:  # float（ミリ秒・小数点 2 桁）
                                status: "ok" | "unavailable" | "api_error" }
 ```
@@ -316,7 +341,7 @@ k8s-rails.request  payload: { operation: :list, group:, version:, plural:, names
 
 | レイヤー | 手法 | 対象 |
 |---|---|---|
-| ユニット | `K8sRails.config.api_client` に**スタブ**（kruby `CustomObjectsApi` と同型のメソッド。namespaced 4 メソッド `get_namespaced_custom_object` / `list_namespaced_custom_object` / `create_namespaced_custom_object` / `patch_namespaced_custom_object` ＋ cluster 4 メソッド `get_cluster_custom_object` / `list_cluster_custom_object` / `create_cluster_custom_object` / `patch_cluster_custom_object` を実装する素のオブジェクト。`StringKeyedAdapter` がこの形式を呼ぶ）を注入 | client（橋渡し・例外変換）、resource（整形・readonly 制限・スコープ制限）、crd（メソッド生成・scope 検証） |
+| ユニット | `K8sRails.config.api_client` に**スタブ**（kruby `ApiClient#call_api` と同型の 1 メソッド `call_api(http_method, path, opts)` を実装する素のオブジェクト。`http_method` は `:GET` / `:POST` / `:PATCH` / `:DELETE`、`path` は宣言座標から構築された REST パス（core v1 `/api/v1/...` / named `/apis/{group}/{version}/...`）、戻り値 `[data, status_code, headers]`。`StringKeyedAdapter` がこの形式を呼ぶ）を注入 | client（橋渡し・例外変換・パス構築）、resource（整形・readonly 制限・スコープ制限）、crd（メソッド生成・scope 検証） |
 | 設定 | spec 間で `K8sRails.reset!` | 宣言の破棄・再接続 |
 | 集積（任意） | GitHub Actions で **kind**（または既存 microk8s に接続するジョブ）で実クラスタ E2E | v0.1 の必須ではない。**推奨**: consumer アプリ移行時の検証を兼ねる |
 
@@ -329,7 +354,7 @@ k8s-rails.request  payload: { operation: :list, group:, version:, plural:, names
 |---|---|---|
 | **v0.1** | §5 の公開 API（CRD 宣言 / list / find / create / patch / 例外 / 計測 / スタブテスト）+ README | rspec 全緑 + **consumer アプリの K8s サービスを `k8s-rails` に移行して動作確認**（§12） |
 | **v0.2** | #16–#19 の公開 API 拡充・修正（cluster-scoped CRD `scope:` + `*_cluster` メソッド、`configure` のアトミック契約、`connected?` の注入契約、kruby loader 探索順序の修正）。設計書 v0.1.12（案） | rspec 全緑（クラスタ不要）+ 公開 gem push（v0.1.0 と同導線） |
-| v0.3 | watch（`watch` メソッド、kruby の watch サポート上）、core v1 built-in リソース対応（CustomObjects API では不可なため別途 core API 経路、§2.2）、kind E2E の CI 化、Ruby 3.5 stable / 4.1 系の matrix 追加（リリースされたら検証の上追加。Ruby 3.5 preview / 4.0 は v0.2.1 で対応済み） | v0.2 運用のフィードバック |
+| v0.3 | watch（`watch` メソッド、kruby の watch サポート上）、kind E2E の CI 化、Ruby 3.5 stable / 4.1 系の matrix 追加（リリースされたら検証の上追加。Ruby 3.5 preview / 4.0 は v0.2.1 で対応済み） | v0.2 運用のフィードバック |
 | v0.4 | （展望）複数クラスタ（ネームスペース化された client 集合）、リトライポリシー | — |
 
 v0.1 の milestone 分割（開発セッション向けのタスク単位目安）:
@@ -432,3 +457,4 @@ PR の差分を最小化）。
 | 0.1.11 | 2026-09-22 | Issue #16–#19 対応: ①#16 `configure` の例外送出時は設定済みフラグをリセット（「一度だけ」はブロック正常終了時にのみ成立）。例外前に書かれた属性は残存することを契約として明文化（§5.1）②#17 `scope: :namespaced`（既定）/ `:cluster` を宣言 API に追加。cluster 系 4 メソッド（`list_cluster` / `find_cluster` / `find_or_nil_cluster` / `create_cluster` / `patch_cluster`）と双方向の ArgumentError 契約（§5.3）。transport は kruby の `*_cluster_custom_object` 4 メソッドを新たに使用③#18 `connected?` は `config.api_client` 注入時に I/O なしで `true`（§5.2）。注入下で Resource 操作と接続確認の挙動を一致させる④#19 kruby 1.36.x の loader 実装順（**KUBECONFIG → `~/.kube/config` → in-cluster**）を README / 設計書 / 設定コメントに明記し、§7 の上げ替え確認事項に探索順序の再確認を追加（in-cluster は最後。従来の「in-cluster → KUBECONFIG」記述は誤り） | 実装反映済み |
 | 0.1.12 | 2026-09-22 | PR #20 レビュー対応（Codex P2 + Copilot M/L 4 系統）: ①#16 のリセット範囲を `rescue StandardError` から**任意の異常終了**（`LoadError` / `ScriptError` / `throw` / non-local return 等）に拡大（成功マーカー + `ensure` で実装、spec 2 件追加）。§5.1 / README の契約文言も「任意の異常終了」に修正②README の「`namespace:` 引数を受け取る」記述を namespaced メソッドに限定（`*_cluster` は受け付けない）③§6 の kruby 上げ替え確認事項を 8 メソッド + 探索順序に同期④`api_client` 注入スタブの契約を namespaced 4 + cluster 4 の 8 メソッドに統一（§5.1 表 / configuration.rb コメント / §9） | 実装反映済み |
 | 0.1.13 | 2026-09-22 | v0.2.1 リリース準備 — Ruby 対応範囲の拡大・検証: ①Ruby 4.0.7（stable・v4.0.7）上で全 rspec / rubocop を実行し動作確認（kruby 1.36.4.1 の install / 動作を含む）②宣言範囲を **`>= 3.3, < 4.1`** に拡大（gemspec / §6 / README / test.yml）。上限は「宣言した minor を必ず CI で検証する」方針で検証済みの 4.0 系に設定（`< 5.0` 等未検証 minor を区間で挟み込む形は RubyGems が集合和を表現できないため不採用・§13 に明記）③RubyGems は `3.5.0-preview1` を範囲内に満たすため 3.5 も実際に対応・検証（3.5.0-preview1 で全 suite / rubocop 緑確認）。matrix は 3.3.0 / 3.3.8 / 3.4.10 / 3.5.0-preview1 / 4.0.7 の 5 系統で範囲内公開済み Ruby を全カバー（§13） | 実装反映済み |
+| 0.1.14 | 2026-09-22 | **対応リソースの拡大: unified REST transport 導入で core v1 built-in（Pod / Service / ConfigMap / Node 等）に対応**（旧 `CustomObjectsApi` 経路では `group: ""` が 404 だった唯一のギャップ。named built-in は従来から動作）。①transport を `Kubernetes::ApiClient#call_api` 上の統一 REST 層に改訂（`client.rb`。パス構築: core `/api/v1/...` / named `/apis/{group}/{version}/...`・CGI escape・json-patch Content-Type 維持）②`delete` / `delete_cluster` を追加（CRUD 完成。readonly ゲート同型。Status オブジェクトを文字列キーで返す）③テスト注入スタブの契約を `call_api` の 1 メソッドに統一（§5.1 表 / configuration.rb コメント / §9）④実クラスタ（v1.33.13）で Pod list / Deployment find / ConfigMap create・patch・delete / Node list_cluster を E2E 検証 | 実装反映済み |

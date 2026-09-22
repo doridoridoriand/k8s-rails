@@ -18,12 +18,12 @@ module K8sRails
     # 認証を上書きする場合に指定する。
     attr_accessor :connection
 
-    # テスト専用（§5.1）。CustomObjectsApi と同型の 8 メソッド
-    # （namespaced 4 メソッド `get_namespaced_custom_object` 等 ＋ cluster 4
-    # メソッド `get_cluster_custom_object` 等）を実装した素の
-    # オブジェクトを指定すると、Client.build は接続解決をスキープしてこれを
-    # 内部トランスポートとして使う（namespaced 宣言だけを使う場合は
-    # namespaced 4 メソッドのみの実装で足りる）。
+    # テスト専用（§5.1）。kruby の `Kubernetes::ApiClient#call_api` と同型の
+    # `call_api(http_method, path, opts)` メソッドを実装した素のオブジェクトを
+    # 指定すると、Client.build は接続解決をスキープしてこれを内部トランスポート
+    # として使う（`StringKeyedAdapter` が `call_api` を呼ぶ）。path は宣言の
+    # 座標から構築された API パス（core v1 は /api/v1/...、named グループは
+    # /apis/{group}/{version}/...）。
     attr_accessor :api_client
 
     # ActiveSupport::Notifications での計測の ON/OFF（§8。M3 で実装）。

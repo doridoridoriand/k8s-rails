@@ -2,6 +2,28 @@
 
 `k8s-rails` の全 notable な変更はこのファイルに記録する。
 
+## Unreleased
+
+- **対応リソースの拡大: core v1 built-in（Pod / Service / ConfigMap / Node 等）に対応**。
+  従来、transport は kruby の `CustomObjectsApi`（`/apis/{group}/...` 固定パス）
+  に依存しており、`group: ""` の core v1 リソース（`/api/v1/...`）だけは 404
+  で到達できなかった（named built-in は従来から動作）。transport を
+  `Kubernetes::ApiClient#call_api` 上の**統一 REST 層**に改訂し、
+  core v1 / named built-in / CRD の全てを宣言座標からのパス構築で到達させる。
+  named 系・CRD の既存宣言の挙動は不変。
+- **`delete` / `delete_cluster` を追加**（CRUD 完成）。readonly ゲートは
+  create / patch と同型（`readonly: true` 宣言で呼ぶと `ReadOnlyError`）。
+  K8s は削除成功時に Status オブジェクト（`{"kind":"Status","status":"Success"}`）を返す。
+- **テスト注入スタブの契約変更（テストコードへの影響）**: `config.api_client`
+  が実装すべきメソッドは CustomObjectsApi の 8 メソッドから
+  `call_api(http_method, path, opts)` の 1 メソッドに統一
+  （戻り値 `[data, status_code, headers]`、http_method は
+  `:GET` / `:POST` / `:PATCH` / `:DELETE`）。既存スタブは `call_api` に
+  置き換える必要がある（実クラスタ接続の production コードには影響なし）。
+- `k8s-rails.request` notification の `operation` に `:delete` を追加。
+- 実クラスタ（microk8s v1.33.13）で Pod list / Deployment find /
+  ConfigMap create・patch・delete / Node list_cluster を E2E 検証済み。
+
 ## 0.2.1
 
 - **Ruby 3.5 / 4.0 対応の宣言**（宣言範囲拡大のみ・コード・挙動変更なし）:

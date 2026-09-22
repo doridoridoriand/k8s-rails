@@ -69,11 +69,7 @@ RSpec.describe "K8sRails.instrument" do
   it "falls back to status api_error for exceptions outside the K8sRails hierarchy" do
     K8sRails.config.instrumentation = true
     bad = Class.new do
-      def list_namespaced_custom_object(*) = raise NoMethodError, "malformed stub"
-
-      def get_namespaced_custom_object(*) = {}
-      def create_namespaced_custom_object(*) = {}
-      def patch_namespaced_custom_object(*) = {}
+      def call_api(*) = raise NoMethodError, "malformed stub"
     end.new
     K8sRails.config.api_client = bad
     wf = declare

@@ -15,7 +15,7 @@ RSpec.describe K8sRails::Client do
       kconfig.api_key["authorization"] = "Bearer my-token"
       K8sRails.config.connection = kconfig
 
-      K8sRails.client # triggers build_custom_objects_api
+      K8sRails.client # triggers build_api_client
 
       expect(kconfig.api_key["BearerToken"]).to eq("Bearer my-token")
     end
@@ -44,7 +44,7 @@ RSpec.describe K8sRails::Client do
   # --- Lazy connect ---------------------------------------------------------
 
   describe "lazy connection" do
-    it "builds without network I/O (in-memory CustomObjectsApi)" do
+    it "builds without network I/O (in-memory ApiClient)" do
       kconfig = Kubernetes::Configuration.new
       kconfig.api_key["authorization"] = "Bearer tok"
       K8sRails.config.connection = kconfig
@@ -58,6 +58,38 @@ RSpec.describe K8sRails::Client do
       first = K8sRails.client
       second = K8sRails.client
       expect(first).to equal(second)
+    end
+  end
+
+  # --- Path building (core v1 vs named group, namespaced vs cluster) --------
+
+  describe "API path building" do
+    let(:fake) { FakeTransport.new }
+    before { K8sRails.config.api_client = fake }
+
+    it "builds a named namespaced path /apis/{group}/{version}/namespaces/{ns}/{plural}" do
+      K8sRails.client.list("apps", "v1", "team-a", "deployments")
+      expect(fake.paths).to eq([["/apis/apps/v1/namespaces/team-a/deployments"]])
+    end
+
+    it "builds a core v1 namespaced path /api/v1/namespaces/{ns}/{plural} for an empty group" do
+      K8sRails.client.get("", "v1", "default", "pods", "pod-1")
+      expect(fake.paths).to eq([["/api/v1/namespaces/default/pods/pod-1"]])
+    end
+
+    it "builds a named cluster path without a namespace segment" do
+      K8sRails.client.list_cluster("cert-manager.io", "v1", "clusterissuers")
+      expect(fake.paths).to eq([["/apis/cert-manager.io/v1/clusterissuers"]])
+    end
+
+    it "builds a core v1 cluster path /api/v1/{plural} for nodes" do
+      K8sRails.client.list_cluster("", "v1", "nodes")
+      expect(fake.paths).to eq([["/api/v1/nodes"]])
+    end
+
+    it "CGI-escapes the name segment" do
+      K8sRails.client.get("", "v1", "default", "pods", "a/b")
+      expect(fake.paths).to eq([["/api/v1/namespaces/default/pods/a%2Fb"]])
     end
   end
 
@@ -88,8 +120,13 @@ RSpec.describe K8sRails::Client do
       expect(out).to eq("metadata" => { "name" => "wf-1" }, "patched" => true)
     end
 
-    # Cluster-scoped endpoints (#17): same normalization contract, kruby
-    # *_cluster_custom_object signatures (no namespace argument).
+    it "deep-stringifies delete responses (API status object)" do
+      out = K8sRails.client.delete("g", "v", "n", "workflows", "wf-1")
+      expect(out).to eq("kind" => "Status", "status" => "Success")
+    end
+
+    # Cluster-scoped endpoints (#17): same normalization contract, no namespace
+    # segment in the path.
     it "deep-stringifies list_cluster responses" do
       out = K8sRails.client.list_cluster("g", "v", "clusterissuers")
       expect(out).to eq("items" => [{ "name" => "a" }], "kind" => "List")
@@ -108,6 +145,11 @@ RSpec.describe K8sRails::Client do
     it "deep-stringifies patch_cluster responses" do
       out = K8sRails.client.patch_cluster("g", "v", "clusterissuers", "ci-1", [{ op: "add", path: "/a", value: 1 }])
       expect(out).to eq("metadata" => { "name" => "ci-1" }, "patched" => true)
+    end
+
+    it "deep-stringifies delete_cluster responses" do
+      out = K8sRails.client.delete_cluster("g", "v", "clusterissuers", "ci-1")
+      expect(out).to eq("kind" => "Status", "status" => "Success")
     end
   end
 
@@ -148,6 +190,12 @@ RSpec.describe K8sRails::Client do
     it "converts the same table for cluster-scoped operations (#17)" do
       with_raising_transport(Kubernetes::ApiError.new(code: 404, response_body: nil))
       expect { K8sRails.client.get_cluster("g", "v", "p", "missing") }
+        .to raise_error(K8sRails::NotFound)
+    end
+
+    it "converts delete 404 to NotFound" do
+      with_raising_transport(Kubernetes::ApiError.new(code: 404, response_body: nil))
+      expect { K8sRails.client.delete("g", "v", "n", "p", "missing") }
         .to raise_error(K8sRails::NotFound)
     end
   end
@@ -208,54 +256,65 @@ RSpec.describe K8sRails::Client do
   end
 end
 
-# A fake transport implementing the four CustomObjects operations with
-# SYMBOL keys, to prove the adapter normalizes to string keys.
+# A fake transport implementing kruby's `Kubernetes::ApiClient#call_api`
+# protocol with SYMBOL-keyed responses, to prove the adapter normalizes to
+# string keys. Records the op symbol (@calls) and the built path (@paths).
 class FakeTransport
-  attr_reader :calls
+  attr_reader :calls, :paths
 
   def initialize
     @calls = []
+    @paths = []
   end
 
-  def list_namespaced_custom_object(_g, _v, _ns, _p)
-    @calls << :list
-    { items: [{ name: "a" }], kind: "List" }
+  # kruby call_api returns [data, status_code, headers].
+  def call_api(method, path, opts = {})
+    @paths << [path]
+    op = op_name(method, path)
+    @calls << op
+    [response_for(op, path, opts), 200, {}]
   end
 
-  def get_namespaced_custom_object(_g, _v, _ns, _p, name)
-    @calls << :get
-    { metadata: { name: name } }
+  private
+
+  def op_name(method, path)
+    case method
+    when :GET then collection_path?(path) ? :list : :get
+    when :POST then :create
+    when :PATCH then :patch
+    when :DELETE then :delete
+    else method
+    end
   end
 
-  def create_namespaced_custom_object(_g, _v, _ns, _p, body)
-    @calls << :create
-    { metadata: (body["metadata"] || body[:metadata] || {}).merge(name: "created") }
+  def response_for(op, path, opts)
+    case op
+    when :list then { items: [{ name: "a" }], kind: "List" }
+    when :get then { metadata: { name: name_of(path) } }
+    when :create then create_response(opts)
+    when :patch then { metadata: { name: name_of(path) }, patched: true }
+    when :delete then { kind: "Status", status: "Success" }
+    else {}
+    end
   end
 
-  def patch_namespaced_custom_object(_g, _v, _ns, _p, name, _body)
-    @calls << :patch
-    { metadata: { name: name }, patched: true }
+  def create_response(opts)
+    body = opts[:body] || {}
+    meta = body[:metadata] || body["metadata"] || {}
+    { metadata: meta.merge(name: "created") }
   end
 
-  # Cluster-scoped variants (kruby *_cluster_custom_object: no namespace arg).
-  def list_cluster_custom_object(_g, _v, _p)
-    @calls << :list_cluster
-    { items: [{ name: "a" }], kind: "List" }
+  def name_of(path)
+    path.split("/").last
   end
 
-  def get_cluster_custom_object(_g, _v, _p, name)
-    @calls << :get_cluster
-    { metadata: { name: name } }
-  end
-
-  def create_cluster_custom_object(_g, _v, _p, body)
-    @calls << :create_cluster
-    { metadata: (body["metadata"] || body[:metadata] || {}).merge(name: "created") }
-  end
-
-  def patch_cluster_custom_object(_g, _v, _p, name, _body)
-    @calls << :patch_cluster
-    { metadata: { name: name }, patched: true }
+  # A collection path ends at the plural; an object path has one more segment.
+  # core (/api/{v}...) has 2 leading segments, named (/apis/{g}/{v}...) has 3.
+  def collection_path?(path)
+    parts = path.split("/").reject(&:empty?)
+    base = parts.first == "api" ? 2 : 3
+    depth = base + (parts.include?("namespaces") ? 2 : 0) + 1
+    parts.size == depth
   end
 end
 
@@ -266,35 +325,7 @@ class RaisingTransport
     @error = error
   end
 
-  def list_namespaced_custom_object(*)
-    raise @error
-  end
-
-  def get_namespaced_custom_object(*)
-    raise @error
-  end
-
-  def create_namespaced_custom_object(*)
-    raise @error
-  end
-
-  def patch_namespaced_custom_object(*)
-    raise @error
-  end
-
-  def list_cluster_custom_object(*)
-    raise @error
-  end
-
-  def get_cluster_custom_object(*)
-    raise @error
-  end
-
-  def create_cluster_custom_object(*)
-    raise @error
-  end
-
-  def patch_cluster_custom_object(*)
+  def call_api(*)
     raise @error
   end
 end
