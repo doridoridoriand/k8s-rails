@@ -2,7 +2,7 @@
 
 `k8s-rails` の全 notable な変更はこのファイルに記録する。
 
-## Unreleased
+## 0.3.0
 
 - **対応リソースの拡大: core v1 built-in（Pod / Service / ConfigMap / Node 等）に対応**。
   従来、transport は kruby の `CustomObjectsApi`（`/apis/{group}/...` 固定パス）
