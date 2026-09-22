@@ -8,9 +8,9 @@ Gem::Specification.new do |spec|
   spec.authors = ["Dorian - Takahiro Ishida"]
   spec.email = ["i.am.eager.for.peace@gmail.com"]
 
-  spec.summary = "Kubernetes API / CRD convention layer for Rails applications"
+  spec.summary = "Kubernetes API access convention layer for Rails applications"
   spec.description =
-    "k8s-rails provides the connection / CRD access / error-handling " \
+    "k8s-rails provides the connection, resource access, and error-handling " \
     "convention layer for Rails applications talking to the Kubernetes API, as a gem."
   spec.homepage = "https://github.com/doridoridoriand/k8s-rails"
   spec.license = "MIT"
