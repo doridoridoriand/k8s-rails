@@ -13,7 +13,7 @@ For the design rationale, see the [design document (docs/design.md)](docs/design
 
 | Item | Supported range | Notes |
 |------|-----------------|-------|
-| Ruby | `>= 3.3, < 4.0` | Floor: kruby 1.36.x requires Ruby 3.3. Upper bound: unverified Ruby 4.x is excluded from the declared range. CI verifies the declared range with a 3.3.0 / 3.3.8 / 3.4.10 matrix |
+| Ruby | `>= 3.3, < 4.1` | Floor: kruby 1.36.x requires Ruby 3.3. Ruby 4.0 support verified on Ruby 4.0.7 (2026-09-22); Ruby 3.5 verified on 3.5.0-preview1 (the only released 3.5, 2026-09-22). CI verifies the declared range with a 3.3.0 / 3.3.8 / 3.4.10 / 3.5.0-preview1 / 4.0.7 matrix — every released Ruby in the range |
 | kruby | `~> 1.36.0` | The official Kubernetes OpenAPI client |
 | Kubernetes server | **Verified on v1.33.x** (a real cluster, microk8s v1.33.13, 2026-09-21) | kruby 1.36.x is a 1.36-series client. Newer servers (1.36, etc.) use the same API (CustomObjects API v1), so compatibility is expected, but has not yet been verified against a real cluster |
 | Dependencies | **kruby only** at runtime | ActiveSupport is used only for optional [instrumentation](#instrumentation-optional-activesupport) (no-op when absent) |
@@ -27,7 +27,7 @@ gem "k8s-rails", "~> 0.2"
 
 ```ruby
 require "k8s-rails"
-K8sRails::VERSION # => "0.2.0"
+K8sRails::VERSION # => "0.2.1"
 ```
 
 `require` is side-effect-free and needs no cluster. kruby itself is loaded
@@ -246,8 +246,8 @@ issue first.
 
 ## Roadmap (v0.3+)
 
-- Ruby 3.5 / 4.0 support (after verifying against the stable releases, then
-  widening the declared range and the CI matrix)
+- Update the CI matrix when Ruby 3.5 reaches a stable release (3.5 is
+  verified today on 3.5.0-preview1, the only released 3.5)
 - CI-based E2E tests using kind
 - watch (streaming) support, under consideration
 
