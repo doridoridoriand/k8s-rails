@@ -16,11 +16,15 @@ Gem::Specification.new do |spec|
   spec.license = "MIT"
   # kruby 1.36.x は required_ruby_version ">= 3.3"（RubyGems API で実測 2026-09-21、
   # 1.36.0.1〜1.36.4.1 全バージョン）。実行時依存の下限に合わせる。
-  # 上限 `< 5.0` は「宣言した minor を必ず CI で検証する」方針のため:
-  # Ruby 4.0（stable・v4.0.7）は 2026-09-22 に Ruby 4.0.7 上で全 suite /
-  # rubocop 検証済み（matrix に 4.0.7 を追加）。Ruby 3.5 は stable 化まで
-  # 宣言範囲外（v0.3 で検討・設計書 §10）。
-  spec.required_ruby_version = [">= 3.3", "< 5.0"]
+  # 上限 `< 4.1` は「宣言した minor を必ず CI で検証する」方針のため:
+  # 2026-09-22 に Ruby 4.0.7（stable）と Ruby 3.5.0-preview1（3.5 系で公開済みの
+  # 唯一のリリース・ruby/ruby タグ実測）で全 suite / rubocop を実行し緑を確認
+  # （matrix に 4.0.7 / 3.5.0-preview1 を追加）。この範囲で公開済みの Ruby は
+  # 3.3.x / 3.4.x / 3.5.0-preview1 / 4.0.x のみ（4.1 系のリリースなし・
+  # 実測 2026-09-22）のため宣言範囲 = 検証範囲が成立。RubyGems の version
+  # requirement は集合和（union）を表現できないため、未検証 minor を区間で
+  # 挟み込む形（`< 5.0` 等）は取らない。
+  spec.required_ruby_version = [">= 3.3", "< 4.1"]
 
   # RubyGems.org ページに source / changelog リンクを表示させるためのメタ情報。
   spec.metadata["source_code_uri"] = "https://github.com/doridoridoriand/k8s-rails"

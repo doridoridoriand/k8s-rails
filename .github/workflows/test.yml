@@ -21,15 +21,17 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # gemspec の宣言範囲（>= 3.3, < 5.0）をカバーする 4 系統:
+        # gemspec の宣言範囲（>= 3.3, < 4.1）で公開済みの Ruby を
+        # 系統ごとに検証（2026-09-22 時点・ruby/ruby タグ実測、この範囲に
+        # 残る公開リリースは以下のみ）:
         # 3.3.0 = 宣言下限（kruby 1.36.x の required_ruby_version、実測
         # 2026-09-21）、3.3.8 = 開発バージョン（.ruby-version）、
-        # 3.4.10 = 3.x 系の最新 stable、4.0.7 = 4.x の最新 stable
-        # （2026-09-22 にローカル Ruby 4.0.7 上で全 suite / rubocop 検証済み）。
-        # Ruby 3.5 は preview（v3_5_0_preview1）で宣言範囲外。
-        # stable 化された新 minor（3.5 以降 / 4.x 新 patch 等）が出たら
-        # matrix に追加すること（宣言範囲 = 検証範囲・設計書 §13）。
-        ruby: ["3.3.0", "3.3.8", "3.4.10", "4.0.7"]
+        # 3.4.10 = 3.4 系の最新 stable、3.5.0-preview1 = 3.5 系の唯一の
+        # 公開リリース、4.0.7 = 4.0 系の最新 stable。3.5.0-preview1 と
+        # 4.0.7 は 2026-09-22 にローカルで全 suite / rubocop 検証済み。
+        # stable 化された新 minor（3.5 stable / 4.1 系等）が出たら
+        # matrix に追加する（宣言範囲 = 検証範囲・設計書 §13）。
+        ruby: ["3.3.0", "3.3.8", "3.4.10", "3.5.0-preview1", "4.0.7"]
     steps:
       - uses: actions/checkout@v4
       - name: Set up Ruby

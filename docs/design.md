@@ -269,7 +269,7 @@ end
 
 | 依存 | 制約 | 理由 |
 |---|---|---|
-| Ruby | `>= 3.3, < 5.0` | 下限: kruby 1.36.x が `required_ruby_version ">= 3.3"` を宣言（RubyGems API で実測 2026-09-21、1.36.0.1〜1.36.4.1 全バージョン）。上限: 「宣言した Ruby minor を必ず CI で検証する」方針 — Ruby 4.0（stable・v4.0.7）は 2026-09-22 に Ruby 4.0.7 上で全 suite / rubocop を実行し動作確認済み（matrix に 4.0.7 追加・v0.2.1）。Ruby 3.5 は stable 化まで宣言範囲外（v0.3 で検証の上宣言に含める、§10） |
+| Ruby | `>= 3.3, < 4.1` | 下限: kruby 1.36.x が `required_ruby_version ">= 3.3"` を宣言（RubyGems API で実測 2026-09-21、1.36.0.1〜1.36.4.1 全バージョン）。上限: 「宣言した minor を必ず CI で検証する」方針 — 2026-09-22 に Ruby 4.0.7（stable）と Ruby 3.5.0-preview1（3.5 系で公開済みの唯一のリリース）で全 suite / rubocop を実行し緑を確認（matrix に 4.0.7 / 3.5.0-preview1 追加・v0.2.1）。この範囲で公開済みの Ruby は 3.3.x / 3.4.x / 3.5.0-preview1 / 4.0.x のみ（ruby/ruby タグ実測・4.1 系リリースなし）のため宣言範囲 = 検証範囲。RubyGems は version requirement で集合和を表現できないため未検証 minor を区間で挟み込む形（`< 5.0` 等）は取らない。3.5 stable / 4.1 系がリリースされたら matrix を追加して検証（§10 / §13） |
 | `kruby` | `~> 1.36.0` | consumer アプリと同一 pin。`~> 1.36.0` は 1.36.x のみ許可（`~> 1.36` 形式は 1.37 以降も許容してしまうため使用しない）。新しめの kruby に対応する場合は §7 の確認事項（client.rb 8 メソッド（namespaced 4 + cluster 4）・K1 橋渡し・`default_config` 探索順序）を済ませてから明示的に上げ替える |
 | `activesupport` | **任意**（`>= 7.0`） | `defined?(ActiveSupport::Notifications)` でガード（計測のみ、§8）。Rails 無し環境（Cron スクリプト等）でも動作する必要がある — レスポンスの文字列キー化（K2）はこれに依存せず、gem 内部の純 Ruby 変換で担う（§5.2） |
 | `rspec` / `rubocop` | 開発依存 | spec / lint |
@@ -329,7 +329,7 @@ k8s-rails.request  payload: { operation: :list, group:, version:, plural:, names
 |---|---|---|
 | **v0.1** | §5 の公開 API（CRD 宣言 / list / find / create / patch / 例外 / 計測 / スタブテスト）+ README | rspec 全緑 + **consumer アプリの K8s サービスを `k8s-rails` に移行して動作確認**（§12） |
 | **v0.2** | #16–#19 の公開 API 拡充・修正（cluster-scoped CRD `scope:` + `*_cluster` メソッド、`configure` のアトミック契約、`connected?` の注入契約、kruby loader 探索順序の修正）。設計書 v0.1.12（案） | rspec 全緑（クラスタ不要）+ 公開 gem push（v0.1.0 と同導線） |
-| v0.3 | watch（`watch` メソッド、kruby の watch サポート上）、core v1 built-in リソース対応（CustomObjects API では不可なため別途 core API 経路、§2.2）、kind E2E の CI 化、Ruby 3.5 対応（stable 化を確認の上宣言範囲・matrix を拡大。Ruby 4.0 は v0.2.1 で対応済み） | v0.2 運用のフィードバック |
+| v0.3 | watch（`watch` メソッド、kruby の watch サポート上）、core v1 built-in リソース対応（CustomObjects API では不可なため別途 core API 経路、§2.2）、kind E2E の CI 化、Ruby 3.5 stable / 4.1 系の matrix 追加（リリースされたら検証の上追加。Ruby 3.5 preview / 4.0 は v0.2.1 で対応済み） | v0.2 運用のフィードバック |
 | v0.4 | （展望）複数クラスタ（ネームスペース化された client 集合）、リトライポリシー | — |
 
 v0.1 の milestone 分割（開発セッション向けのタスク単位目安）:
@@ -397,14 +397,18 @@ PR の差分を最小化）。
     公開した gem のバージョンがどのコミットに基づくかを追跡できる。
     tag 名と gemspec の `VERSION` は一致させる
   - テスト CI（`.github/workflows/test.yml`）は push / PR 時に rspec + rubocop を実行。
-    gemspec の宣言範囲（`>= 3.3, < 5.0`）を matrix で検証:
+    gemspec の宣言範囲（`>= 3.3, < 4.1`）で公開済みの Ruby を matrix で検証:
     3.3.0（下限・kruby 1.36.x の `>= 3.3`）・3.3.8（開発）・
-    3.4.10（3.x 系の最新 stable）・
-    4.0.7（4.x の最新 stable・2026-09-22 にローカル Ruby 4.0.7 上で
-    全 suite / rubocop 検証済み。3.5 は preview で宣言範囲外）。
-    **宣言範囲を常に matrix がカバーする**こと（`< 5.0` 上限により、
-    5.x のリリースは宣言範囲外。stable 化された新 minor（3.5 以降 /
-    4.x 新 patch 等）が出たら matrix への追加を忘れないこと）。
+    3.4.10（3.4 系の最新 stable）・3.5.0-preview1（3.5 系の唯一の公開
+    リリース・2026-09-22 にローカルで全 suite / rubocop 検証済み）・
+    4.0.7（4.0 系の最新 stable・2026-09-22 にローカルで全 suite /
+    rubocop 検証済み）。
+    **宣言範囲を常に matrix がカバーする**こと（`< 4.1` 上限により
+    4.1 系以降のリリースは宣言範囲外。RubyGems は version requirement で
+    集合和を表現できないため、未検証 minor を区間で挟み込む形
+    （`< 5.0` 等）は取らない — matrix 追加と範囲拡大をセットで行う。
+    3.5 stable / 4.1 系等 stable 化された新リリースが出たら
+    matrix への追加を忘れないこと）。
     テストはクラスタ不要（§9・スタブ注入）のため v0.1 は runner 上のユニットのみ。
     kind / 実クラスタ E2E の CI 化は v0.3 対象（§9・§10）
 - `README` に「kruby pin」「対応 k8s バージョン（実測 v1.33.x で検証済み）」「K1 橋渡しの背景」
@@ -427,4 +431,4 @@ PR の差分を最小化）。
 | 0.1.10 | 2026-09-21 | PR #12 レビュー対応（Copilot）: §13 の公開手順で tag の **remote への push**（`git push origin v<VERSION>`）が欠落しており、GitHub 上のリリースコミットとの対応付け（追溯性）が確保できないとの指摘を反映 | 実装反映済み |
 | 0.1.11 | 2026-09-22 | Issue #16–#19 対応: ①#16 `configure` の例外送出時は設定済みフラグをリセット（「一度だけ」はブロック正常終了時にのみ成立）。例外前に書かれた属性は残存することを契約として明文化（§5.1）②#17 `scope: :namespaced`（既定）/ `:cluster` を宣言 API に追加。cluster 系 4 メソッド（`list_cluster` / `find_cluster` / `find_or_nil_cluster` / `create_cluster` / `patch_cluster`）と双方向の ArgumentError 契約（§5.3）。transport は kruby の `*_cluster_custom_object` 4 メソッドを新たに使用③#18 `connected?` は `config.api_client` 注入時に I/O なしで `true`（§5.2）。注入下で Resource 操作と接続確認の挙動を一致させる④#19 kruby 1.36.x の loader 実装順（**KUBECONFIG → `~/.kube/config` → in-cluster**）を README / 設計書 / 設定コメントに明記し、§7 の上げ替え確認事項に探索順序の再確認を追加（in-cluster は最後。従来の「in-cluster → KUBECONFIG」記述は誤り） | 実装反映済み |
 | 0.1.12 | 2026-09-22 | PR #20 レビュー対応（Codex P2 + Copilot M/L 4 系統）: ①#16 のリセット範囲を `rescue StandardError` から**任意の異常終了**（`LoadError` / `ScriptError` / `throw` / non-local return 等）に拡大（成功マーカー + `ensure` で実装、spec 2 件追加）。§5.1 / README の契約文言も「任意の異常終了」に修正②README の「`namespace:` 引数を受け取る」記述を namespaced メソッドに限定（`*_cluster` は受け付けない）③§6 の kruby 上げ替え確認事項を 8 メソッド + 探索順序に同期④`api_client` 注入スタブの契約を namespaced 4 + cluster 4 の 8 メソッドに統一（§5.1 表 / configuration.rb コメント / §9） | 実装反映済み |
-| 0.1.13 | 2026-09-22 | v0.2.1 リリース準備 — Ruby 4.0 対応の宣言範囲拡大: Ruby 4.0.7（stable・v4.0.7）上で全 rspec / rubocop を実行し動作確認（kruby 1.36.4.1 の install / 動作を含む）したため、宣言範囲を **`>= 3.3, < 5.0`** に拡大（gemspec / §6 / README / test.yml）。matrix に 4.0.7 を追加し宣言範囲 = 検証範囲を維持（§13）。Ruby 3.5 は preview（v3_5_0_preview1）のため stable 化まで宣言範囲外（§10 の v0.3 で検証の上含める） | 実装反映済み |
+| 0.1.13 | 2026-09-22 | v0.2.1 リリース準備 — Ruby 対応範囲の拡大・検証: ①Ruby 4.0.7（stable・v4.0.7）上で全 rspec / rubocop を実行し動作確認（kruby 1.36.4.1 の install / 動作を含む）②宣言範囲を **`>= 3.3, < 4.1`** に拡大（gemspec / §6 / README / test.yml）。上限は「宣言した minor を必ず CI で検証する」方針で検証済みの 4.0 系に設定（`< 5.0` 等未検証 minor を区間で挟み込む形は RubyGems が集合和を表現できないため不採用・§13 に明記）③RubyGems は `3.5.0-preview1` を範囲内に満たすため 3.5 も実際に対応・検証（3.5.0-preview1 で全 suite / rubocop 緑確認）。matrix は 3.3.0 / 3.3.8 / 3.4.10 / 3.5.0-preview1 / 4.0.7 の 5 系統で範囲内公開済み Ruby を全カバー（§13） | 実装反映済み |
