@@ -2,6 +2,18 @@
 
 `k8s-rails` の全 notable な変更はこのファイルに記録する。
 
+## 0.2.1
+
+- **Ruby 4.0 対応の宣言**（宣言範囲拡大のみ・コード・挙動変更なし）:
+  2026-09-22 に Ruby 4.0.7（stable・v4.0.7、2026-09-15 リリース）上で
+  全 rspec / rubocop を実行し緑を確認したため（kruby 1.36.4.1 は
+  4.0.7 への install 成功・動作確認）、`required_ruby_version` を
+  `>= 3.3, < 4.0` から **`>= 3.3, < 5.0`** に拡大。CI matrix に
+  4.0.7 を追加し宣言範囲 = 検証範囲（3.3.0 / 3.3.8 / 3.4.10 / 4.0.7）
+  を維持。Ruby 3.5 は preview（v3_5_0_preview1）のため stable 化まで
+  宣言範囲外（v0.3 で検証の上含める）。設計書 KBR-DESIGN-001
+  v0.1.13（案）へ更新（§6 / §10 / §13 / §14）。
+
 ## 0.2.0
 
 - **cluster-scoped CRD サポート**（#17）: `K8sRails.crd` に `scope: :namespaced`
