@@ -2,6 +2,14 @@
 
 `k8s-rails` の全 notable な変更はこのファイルに記録する。
 
+## 0.3.1
+
+- **gemspec 文言の同期（RubyGems ページ表示の更新）**: `summary` / `description` を
+  v0.3.0 の対応範囲に合わせ更新（PR #25）。公開済み gem の文言は公開後に変更できないため、
+  0.3.1 の公開で RubyGems ページの表示が新文言
+  （"Kubernetes API access convention layer for Rails applications"）に切り替わります。
+  **コード・挙動の変更はありません。**
+
 ## 0.3.0
 
 - **対応リソースの拡大: core v1 built-in（Pod / Service / ConfigMap / Node 等）に対応**。
