@@ -25,12 +25,12 @@ For the design rationale, see the [design document (docs/design.md)](docs/design
 
 ```ruby
 # Gemfile
-gem "k8s-rails", "~> 0.2"
+gem "k8s-rails", "~> 0.3"
 ```
 
 ```ruby
 require "k8s-rails"
-K8sRails::VERSION # => "0.2.1"
+K8sRails::VERSION # => "0.3.0"
 ```
 
 `require` is side-effect-free and needs no cluster. kruby itself is loaded
@@ -332,7 +332,7 @@ through k8s-rails are unaffected (it does not overwrite an already-set
 kruby's own configuration behavior (outside this gem), check this token-key
 issue first.
 
-## Roadmap (v0.3+)
+## Roadmap (v0.4+)
 
 - Update the CI matrix when Ruby 3.5 reaches a stable release (3.5 is
   verified today on 3.5.0-preview1, the only released 3.5)

@@ -1,7 +1,7 @@
 # k8s-rails 設計書
 
 - 文書番号: KBR-DESIGN-001
-- 版: 0.1.14（案）
+- 版: 0.1.15（案）
 - 日付: 2026-09-15
 - 対象リポジトリ: k8s-rails（本設計の実装先）
 - ライセンス: MIT（LICENSE は main に既存）
@@ -41,7 +41,7 @@ K8s CRD を扱えるようにし、(b) 実際の consumer アプリをこの gem
 ### 2.2 非スコープ（本設計の外）
 
 - **core v1 リソースの CustomObjects 経路でのアクセス** — 2026-09-22 に**解消済み**（unified REST transport 導入、§5.2 改訂）。以前は core v1（Pod / Service / ConfigMap / Node 等）が `/api/v1/...`（group 区間なし）のため `CustomObjectsApi` では扱えず、`group: ""` 宣言は 404 になった。**named-group の built-in（apps/v1 の Deployment 等）は CustomObjects 経路でも動作していた**（generic な `/apis/{group}/...` クライアントのため）。現在の transport は `Kubernetes::ApiClient#call_api` 上の統一 REST 層で、core v1（`group: ""` → `/api/v1/...`）・named built-in・CRD を 1 つの経路で扱う
-- **watch（ストリーム）** — v0.1 では非対応。kruby の watch は get/list より成熟度が低く、初版の API 保証範囲から外す（§10 で v0.3 対象）
+- **watch（ストリーム）** — v0.1 では非対応。kruby の watch は get/list より成熟度が低く、初版の API 保証範囲から外す（§10 で v0.4 対象）
 - アプリの**デプロイ**（helm / kustomize 生成等） — `kuby-core` の領域
 - RBAC 権限の付与・管理 — 呼び出しアプリ側の ClusterRole/Role の責務
 - 複数クラスタ同時接続 — v0.1 は単一クラスタ前提（§11 展望）
@@ -106,7 +106,7 @@ k8s-rails/
 ├── lib/
 │   ├── k8s-rails.rb         # エントリ。require 集 + モジュール定義
 │   └── k8s_rails/
-│       ├── version.rb       # VERSION = "0.2.1"
+│       ├── version.rb       # VERSION = "0.3.0"
 │       ├── configuration.rb # Config: namespace, connection, 計測 ON/OFF
 │       ├── client.rb        # 接続解決・BearerToken 橋渡し・計測ラップ
 │       ├── crd.rb           # K8sRails.crd 宣言 → Resource 生成
@@ -345,7 +345,7 @@ k8s-rails.request  payload: { operation: :list, group:, version:, plural:, names
 | 設定 | spec 間で `K8sRails.reset!` | 宣言の破棄・再接続 |
 | 集積（任意） | GitHub Actions で **kind**（または既存 microk8s に接続するジョブ）で実クラスタ E2E | v0.1 の必須ではない。**推奨**: consumer アプリ移行時の検証を兼ねる |
 
-- 本設計では CI は `rspec` + `rubocop` のみを必須とし、kind E2E は v0.3 で
+- 本設計では CI は `rspec` + `rubocop` のみを必須とし、kind E2E は v0.4 で
   GitHub Actions の追加として扱う（実クラスタへの接続 CI はネットワーク依存のため採用しない）。
 
 ## 10. リリース計画
@@ -354,8 +354,9 @@ k8s-rails.request  payload: { operation: :list, group:, version:, plural:, names
 |---|---|---|
 | **v0.1** | §5 の公開 API（CRD 宣言 / list / find / create / patch / 例外 / 計測 / スタブテスト）+ README | rspec 全緑 + **consumer アプリの K8s サービスを `k8s-rails` に移行して動作確認**（§12） |
 | **v0.2** | #16–#19 の公開 API 拡充・修正（cluster-scoped CRD `scope:` + `*_cluster` メソッド、`configure` のアトミック契約、`connected?` の注入契約、kruby loader 探索順序の修正）。設計書 v0.1.12（案） | rspec 全緑（クラスタ不要）+ 公開 gem push（v0.1.0 と同導線） |
-| v0.3 | watch（`watch` メソッド、kruby の watch サポート上）、kind E2E の CI 化、Ruby 3.5 stable / 4.1 系の matrix 追加（リリースされたら検証の上追加。Ruby 3.5 preview / 4.0 は v0.2.1 で対応済み） | v0.2 運用のフィードバック |
-| v0.4 | （展望）複数クラスタ（ネームスペース化された client 集合）、リトライポリシー | — |
+| **v0.3** | unified REST transport（`ApiClient#call_api` 上の統一 REST 層）で**対応リソースを全リソース（core v1 built-in 含）に拡大**＋`delete` / `delete_cluster` 追加（CRUD 完成）＋README QuickStart 改稿（Pod / Deployment CRUD を主例）。設計書 v0.1.15（案） | rspec 全緑（クラスタ不要）＋実クラスタ E2E（Pod / Deployment / Node 読み取り・ConfigMap create/patch/delete・readonly ゲート）＋公開 gem push（v0.1.0 と同導線） |
+| v0.4 | watch（`watch` メソッド、kruby の watch サポート上）、kind E2E の CI 化、Ruby 3.5 stable / 4.1 系の matrix 追加（リリースされたら検証の上追加。Ruby 3.5 preview / 4.0 は v0.2.1 で対応済み）、リトライポリシー | v0.3 運用のフィードバック |
+| v0.5 | （展望）複数クラスタ（ネームスペース化された client 集合） | — |
 
 v0.1 の milestone 分割（開発セッション向けのタスク単位目安）:
 
@@ -435,7 +436,7 @@ PR の差分を最小化）。
     3.5 stable / 4.1 系等 stable 化された新リリースが出たら
     matrix への追加を忘れないこと）。
     テストはクラスタ不要（§9・スタブ注入）のため v0.1 は runner 上のユニットのみ。
-    kind / 実クラスタ E2E の CI 化は v0.3 対象（§9・§10）
+    kind / 実クラスタ E2E の CI 化は v0.4 対象（§9・§10）
 - `README` に「kruby pin」「対応 k8s バージョン（実測 v1.33.x で検証済み）」「K1 橋渡しの背景」
   を明記する（検索でヒットする重要な注意点のため）
 
@@ -458,3 +459,4 @@ PR の差分を最小化）。
 | 0.1.12 | 2026-09-22 | PR #20 レビュー対応（Codex P2 + Copilot M/L 4 系統）: ①#16 のリセット範囲を `rescue StandardError` から**任意の異常終了**（`LoadError` / `ScriptError` / `throw` / non-local return 等）に拡大（成功マーカー + `ensure` で実装、spec 2 件追加）。§5.1 / README の契約文言も「任意の異常終了」に修正②README の「`namespace:` 引数を受け取る」記述を namespaced メソッドに限定（`*_cluster` は受け付けない）③§6 の kruby 上げ替え確認事項を 8 メソッド + 探索順序に同期④`api_client` 注入スタブの契約を namespaced 4 + cluster 4 の 8 メソッドに統一（§5.1 表 / configuration.rb コメント / §9） | 実装反映済み |
 | 0.1.13 | 2026-09-22 | v0.2.1 リリース準備 — Ruby 対応範囲の拡大・検証: ①Ruby 4.0.7（stable・v4.0.7）上で全 rspec / rubocop を実行し動作確認（kruby 1.36.4.1 の install / 動作を含む）②宣言範囲を **`>= 3.3, < 4.1`** に拡大（gemspec / §6 / README / test.yml）。上限は「宣言した minor を必ず CI で検証する」方針で検証済みの 4.0 系に設定（`< 5.0` 等未検証 minor を区間で挟み込む形は RubyGems が集合和を表現できないため不採用・§13 に明記）③RubyGems は `3.5.0-preview1` を範囲内に満たすため 3.5 も実際に対応・検証（3.5.0-preview1 で全 suite / rubocop 緑確認）。matrix は 3.3.0 / 3.3.8 / 3.4.10 / 3.5.0-preview1 / 4.0.7 の 5 系統で範囲内公開済み Ruby を全カバー（§13） | 実装反映済み |
 | 0.1.14 | 2026-09-22 | **対応リソースの拡大: unified REST transport 導入で core v1 built-in（Pod / Service / ConfigMap / Node 等）に対応**（旧 `CustomObjectsApi` 経路では `group: ""` が 404 だった唯一のギャップ。named built-in は従来から動作）。①transport を `Kubernetes::ApiClient#call_api` 上の統一 REST 層に改訂（`client.rb`。パス構築: core `/api/v1/...` / named `/apis/{group}/{version}/...`・CGI escape・json-patch Content-Type 維持）②`delete` / `delete_cluster` を追加（CRUD 完成。readonly ゲート同型。Status オブジェクトを文字列キーで返す）③テスト注入スタブの契約を `call_api` の 1 メソッドに統一（§5.1 表 / configuration.rb コメント / §9）④実クラスタ（v1.33.13）で Pod list / Deployment find / ConfigMap create・patch・delete / Node list_cluster を E2E 検証 | 実装反映済み |
+| 0.1.15 | 2026-09-22 | v0.3.0 リリース準備: ①`VERSION` を 0.2.1 → **0.3.0**（version.rb + version spec）②CHANGELOG の `Unreleased` を **0.3.0** に確定③README の install pin（`~> 0.2` → `~> 0.3`）・`VERSION` 例・Roadmap 見出し（v0.3+ → v0.4+）を同期④§10 リリース計画表で v0.3 行を「実際にリリースした内容」に書き換え（unified REST transport / delete / README 改稿）、旧 v0.3 予定内容（watch / kind E2E / matrix 追加）を v0.4 へ、リトライポリシーを v0.4 へ、複数クラスタ展望を v0.5 へ移動⑤§2.2 / §9 / §13 の旧「v0.3 対象」参照を v0.4 に修正 | 実装反映済み |
