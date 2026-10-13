@@ -1,8 +1,8 @@
 # k8s-rails 設計書
 
 - 文書番号: KBR-DESIGN-001
-- 版: 0.1.16（案）
-- 日付: 2026-09-22
+- 版: 0.1.17（案）
+- 日付: 2026-10-13
 - 対象リポジトリ: k8s-rails（本設計の実装先）
 - ライセンス: MIT（LICENSE は main に既存）
 
@@ -172,7 +172,7 @@ K8sRails.connected?      # → 成功時は true。失敗は K8sRails::Unavailab
 
 0. `config.api_client` があれば（テスト注入、§5.1）それを直接返し、以降の接続解決をスキップ
 1. `config.connection` があればそれ、なければ `Kubernetes::Configuration.default_config`
-2. **K1 橋渡し**: `api_key['authorization']` が `api_key['BearerToken']` に書かれていなければ複製
+2. **K1 橋渡し**: `api_key['authorization']` が `api_key['BearerToken']` に書かれていなければ複製し、その後の**全 `auth_settings` 呼び出し（= 全リクエスト）で再同期する**（kruby はリクエストごとに `auth_settings` を呼ぶ。in-cluster のトークン更新フックは `api_key_with_prefix("authorization")` 呼び出し時のみ発火するため、初回コピーに固定するとローテーション後のトークンがヘッダに到達せず長時間稼働プロセスで 401 が続く — #29 対応）。ユーザーが明示設定した `BearerToken` はブリッジせず・上書きしない
 3. `Kubernetes::ApiClient` を生成し、`StringKeyedAdapter` で包む。**パス構築**: 宣言の座標から REST パスを構築して `call_api` で実行 — core v1（`group == ""`）は `/api/{version}[/namespaces/{ns}]/{plural}[/{name}]`、named（CRD・named built-in）は `/apis/{group}/{version}[/namespaces/{ns}]/{plural}[/{name}]`。`return_type: "Object"` で kruby が JSON をパース（symbol キー）したオブジェクトを返し、**文字列キー化**（K2）を API レスポンス後に行う（`K8sRails::Normalizer`、ActiveSupport 非依存）
 4. **接続レベルの失敗**（DNS 失敗 / タイムアウト / 接続拒否等）は `K8sRails::Unavailable` に変換して `raise`（リトライはしない）。**kruby 1.36.x ではこれらの転送失敗は HTTP ステータスが無いため `Kubernetes::ApiError`（`code == 0`）として surfacing する**（§5.4 の変換表参照）。認可失敗（401/403）は §5.4 により `K8sRails::ApiError`
 
@@ -248,6 +248,11 @@ ClusterIssuer = K8sRails.crd(
 - 宣言時に `scope: :cluster` と `namespace:` を併用した場合は `ArgumentError`（設定ミスの fail fast）。
 - transport は kruby の `ApiClient#call_api` 上の統一 REST 層で、namespaced / cluster の区別はパス構築（`/namespaces/{ns}` の有無）のみ。テスト注入スタブは `call_api` の 1 メソッドを実装する（§9）。
 
+対象名検証（#28 対応）:
+
+- `find` / `patch` / `delete`（cluster 版を含む）は**通信前に**無効な対象名を拒否する: `nil` / 空文字列 / `.` / `..` → `ArgumentError`。`nil` 名はパス構築上コレクション URL になり、その DELETE は Delete Collection 呼び出し（一括削除リスク）になるため、fail fast する。`.` / `..` は HTTP クライアントのパス正規化で送信先が変わる（実測で確認）。
+- ゲート順: スコープゲート → readonly ゲート → 対象名検証。全ゲートは計測（§8）より前に発火するため、拒否された操作は計測対象にならない。
+
 - **戻り値は常に文字列キーの Hash**（K2 の規約を API 契約として固定）。
   `find` は存在しない場合 `K8sRails::NotFound` を raise（consumer アプリ側が `return nil` にしていたのは
   呼び出し側の都合。gem としては例外が明示的）。「存在しない場合は nil」が欲しい場合は
@@ -311,7 +316,10 @@ end
   `resource.rb` は
   `K8sRails.client.get(group, version, ns, plural, name)` のような **gem 内部 API** だけを使う。
 - kruby 上げ替え時の作業は (1) `ApiClient#call_api` のシグネチャ・`opts` 形式（header_params /
-  query_params / body / auth_names / return_type）の確認、(2) K1 橋渡しの要否確認、
+  query_params / body / auth_names / return_type）の確認、(2) K1 橋渡しの要否と機構の確認
+  （kruby 1.36.x 依存の事実: `auth_settings` が `BearerToken` を読む・in-cluster の更新フックが
+  `api_key_with_prefix("authorization")` 呼び出し時のみ発火する — #29 のブリッジは `auth_settings`
+  呼び出しごとに同期する設計のため、両事実が崩れた場合は再設計）、
   (3) **`Kubernetes::Configuration.default_config` の探索順序確認**
   （kruby 1.36.x の loader 実装順は **KUBECONFIG → `~/.kube/config` → in-cluster** で in-cluster が
   最後。README / 設計書 / 設定コメントがこの順序を明記しているため、loader が変わった場合は
@@ -355,7 +363,7 @@ k8s-rails.request  payload: { operation: :list, group:, version:, plural:, names
 | **v0.1** | §5 の公開 API（CRD 宣言 / list / find / create / patch / 例外 / 計測 / スタブテスト）+ README | rspec 全緑 + **consumer アプリの K8s サービスを `k8s-rails` に移行して動作確認**（§12） |
 | **v0.2** | #16–#19 の公開 API 拡充・修正（cluster-scoped CRD `scope:` + `*_cluster` メソッド、`configure` のアトミック契約、`connected?` の注入契約、kruby loader 探索順序の修正）。設計書 v0.1.12（案） | rspec 全緑（クラスタ不要）+ 公開 gem push（v0.1.0 と同導線） |
 | **v0.3** | unified REST transport（`ApiClient#call_api` 上の統一 REST 層）で**対応リソースを全リソース（core v1 built-in 含）に拡大**＋`delete` / `delete_cluster` 追加（CRUD 完成）＋README QuickStart 改稿（Pod / Deployment CRUD を主例）。設計書 v0.1.15（案） | rspec 全緑（クラスタ不要）＋実クラスタ E2E（Pod / Deployment / Node 読み取り・ConfigMap create/patch/delete・readonly ゲート）＋公開 gem push（v0.1.0 と同導線） |
-| v0.4 | watch（`watch` メソッド、kruby の watch サポート上）、kind E2E の CI 化、Ruby 3.5 stable / 4.1 系の matrix 追加（リリースされたら検証の上追加。Ruby 3.5 preview / 4.0 は v0.2.1 で対応済み）、リトライポリシー | v0.3 運用のフィードバック |
+| v0.4 | #28–#29 対応（対象名検証による一括削除防止、K1 ブリッジの動的同期で in-cluster トークンローテーション反映）、watch（`watch` メソッド、kruby の watch サポート上）、kind E2E の CI 化、Ruby 3.5 stable / 4.1 系の matrix 追加（リリースされたら検証の上追加。Ruby 3.5 preview / 4.0 は v0.2.1 で対応済み）、リトライポリシー | v0.3 運用のフィードバック |
 | v0.5 | （展望）複数クラスタ（ネームスペース化された client 集合） | — |
 
 v0.1 の milestone 分割（開発セッション向けのタスク単位目安）:
@@ -461,3 +469,4 @@ PR の差分を最小化）。
 | 0.1.14 | 2026-09-22 | **対応リソースの拡大: unified REST transport 導入で core v1 built-in（Pod / Service / ConfigMap / Node 等）に対応**（旧 `CustomObjectsApi` 経路では `group: ""` が 404 だった唯一のギャップ。named built-in は従来から動作）。①transport を `Kubernetes::ApiClient#call_api` 上の統一 REST 層に改訂（`client.rb`。パス構築: core `/api/v1/...` / named `/apis/{group}/{version}/...`・CGI escape・json-patch Content-Type 維持）②`delete` / `delete_cluster` を追加（CRUD 完成。readonly ゲート同型。Status オブジェクトを文字列キーで返す）③テスト注入スタブの契約を `call_api` の 1 メソッドに統一（§5.1 表 / configuration.rb コメント / §9）④実クラスタ（v1.33.13）で Pod list / Deployment find / ConfigMap create・patch・delete / Node list_cluster を E2E 検証 | 実装反映済み |
 | 0.1.15 | 2026-09-22 | v0.3.0 リリース準備: ①`VERSION` を 0.2.1 → **0.3.0**（version.rb + version spec）②CHANGELOG の `Unreleased` を **0.3.0** に確定③README の install pin（`~> 0.2` → `~> 0.3`）・`VERSION` 例・Roadmap 見出し（v0.3+ → v0.4+）を同期④§10 リリース計画表で v0.3 行を「実際にリリースした内容」に書き換え（unified REST transport / delete / README 改稿）、旧 v0.3 予定内容（watch / kind E2E / matrix 追加）を v0.4 へ、リトライポリシーを v0.4 へ、複数クラスタ展望を v0.5 へ移動⑤§2.2 / §9 / §13 の旧「v0.3 対象」参照を v0.4 に修正 | 実装反映済み |
 | 0.1.16 | 2026-09-22 | v0.3.1 リリース準備: gemspec の `summary` / `description` 文言更新（PR #25）を**公開 gem として反映するための docs みのパッチリリース**。公開済み gem の文言は公開後に変更できない（RubyGems に gem メタの編集 API / UI なし）ため、0.3.1 の公開で RubyGems ページ表示が新文言に切り替わる。①`VERSION` を 0.3.0 → **0.3.1**（version.rb + version spec）②CHANGELOG に 0.3.1 セクション追加③README の `VERSION` 例・§3 ツリーコメントを同期。**コード・挙動の変更なし** | 実装反映済み |
+| 0.1.17 | 2026-10-13 | Issue #28–#29 対応（両方 priority:high・v0.4 予定）: ①#28 `find` / `patch` / `delete`（cluster 版を含む）が無効な対象名（`nil` / 空文字列 / `.` / `..`）を**通信前に** `ArgumentError` で拒否（従来 `delete(nil)` は Delete Collection URL を生成し一括削除リスク、`.` / `..` は HTTP クライアントのパス正規化で送信先が変化。ゲート順は scope → readonly → 名検証・計測より前）。§5.3 / README に明記②#29 K1 ブリッジを「初回コピー」から「全 `auth_settings` 呼び出し（全リクエスト）で再同期」に改訂: kruby 1.36.x の in-cluster 更新フックは `api_key_with_prefix("authorization")` 呼び出し時のみ発火するため、初回コピー固定では ServiceAccount トークンローテーションが反映されず長時間稼働プロセスで 401 が続く問題を実修正。解決済み config の singleton class に sync モジュールを prepend。ユーザー明示設定の `BearerToken` はブリッジ・上書きしない（区別マーカー付き）。§5.2 / §7（上げ替えチェックリスト）/ README を同期 | 実装反映済み |
