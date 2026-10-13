@@ -43,7 +43,9 @@ module K8sRails
       #   1. `config.connection` if set, else `Kubernetes::Configuration.default_config`
       #   2. K1 bridge: duplicate `api_key['authorization']` into
       #      `api_key['BearerToken']` (kruby 1.36 in-cluster/KUBECONFIG write the
-      #      token under 'authorization' but auth_settings reads 'BearerToken').
+      #      token under 'authorization' but auth_settings reads 'BearerToken'),
+      #      and keep the bridge in sync on every `auth_settings` call so a
+      #      rotated ServiceAccount token is picked up (#29).
       #   3. Build `ApiClient` (in-memory, no I/O).
       #   4. Wrap in a StringKeyedAdapter that normalizes responses (K2) and
       #      converts kruby errors to K8sRails exceptions.
@@ -119,12 +121,37 @@ module K8sRails
       # to `api_key['authorization']` (and the KUBECONFIG path can too), but
       # `Configuration#auth_settings` reads `api_key['BearerToken']` for the
       # `Authorization` header. Without the bridge the header is empty → 401.
-      # Duplicate only when the target key is not already set.
+      #
+      # The bridge must NOT freeze the first copy (#29): kruby's in-cluster
+      # refresh hook only runs inside `api_key_with_prefix("authorization")`
+      # (it re-reads the token file once the refresh deadline passes), and
+      # normal header generation never queries that key. So after the initial
+      # copy, a module is prepended to the resolved config's singleton class
+      # that re-syncs the bridged `BearerToken` from the upstream key on every
+      # `auth_settings` call — kruby calls it for every request, so a rotated
+      # token reaches the header without rebuilding the client. A `BearerToken`
+      # set by the user is neither bridged nor overwritten.
       def bridge_bearer_token(config)
-        auth = config.api_key["authorization"]
-        return if auth.nil? || config.api_key.key?("BearerToken")
+        return if config.api_key["authorization"].nil?
+        return if config.api_key.key?("BearerToken")
+        return if config.instance_variable_get(:@k8s_rails_bridged_bearer)
 
-        config.api_key["BearerToken"] = auth
+        config.api_key["BearerToken"] = config.api_key_with_prefix("authorization")
+        config.instance_variable_set(:@k8s_rails_bridged_bearer, true)
+        config.singleton_class.prepend(BridgedBearerSync)
+      end
+
+      # Prepend target of the K1 bridge (see bridge_bearer_token). kruby calls
+      # `auth_settings` for every request; syncing here (not once at build
+      # time) is what keeps a rotated in-cluster token fresh.
+      module BridgedBearerSync
+        def auth_settings
+          if instance_variable_get(:@k8s_rails_bridged_bearer)
+            fresh = api_key_with_prefix("authorization")
+            api_key["BearerToken"] = fresh unless fresh.nil?
+          end
+          super
+        end
       end
     end
 
