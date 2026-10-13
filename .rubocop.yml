@@ -42,6 +42,13 @@ Metrics/MethodLength:
     - "spec/**/*"
     - "lib/k8s_rails/crd.rb" # fixed 6-key keyword pass-through (design §5.3)
 
+Metrics/ClassLength:
+  Exclude:
+    # Fixed public surface: 10 operations (each a small method) + one private
+    # gate per concern (scope / readonly / object name, #17 / #28). Fitting
+    # 100 lines would force gates to be inlined and hurt readability.
+    - "lib/k8s_rails/resource.rb"
+
 Metrics/ParameterLists:
   CountKeywordArgs: false
   Max: 5

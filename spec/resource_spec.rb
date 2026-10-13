@@ -281,4 +281,64 @@ RSpec.describe K8sRails::Resource do
       expect(@fake.calls).to be_empty
     end
   end
+
+  # --- Invalid object name validation (#28) ----------------------------------
+
+  describe "invalid object name validation (#28)" do
+    before do
+      # core v1 (group "") namespaced, named group namespaced, cluster scope
+      @pod = K8sRails.crd(group: "", version: "v1", plural: "pods", kind: "Pod",
+                          namespace: "default", readonly: false)
+      @deployment = K8sRails.crd(group: "apps", version: "v1", plural: "deployments",
+                                 kind: "Deployment", namespace: "team-a", readonly: false)
+      @ci = K8sRails.crd(group: "cert-manager.io", version: "v1", plural: "clusterissuers",
+                         kind: "ClusterIssuer", scope: :cluster, readonly: false)
+    end
+
+    it "rejects nil / '' / '.' / '..' on namespaced delete before any transport call (core v1)" do
+      [nil, "", ".", ".."].each do |name|
+        expect { @pod.delete(name) }.to raise_error(ArgumentError, /object name/)
+      end
+      expect(@fake.calls).to be_empty
+    end
+
+    it "rejects the same names on find / find_or_nil / patch (named group)" do
+      [nil, "", ".", ".."].each do |name|
+        expect { @deployment.find(name) }.to raise_error(ArgumentError)
+        expect { @deployment.find_or_nil(name) }.to raise_error(ArgumentError)
+        expect { @deployment.patch(name, []) }.to raise_error(ArgumentError)
+      end
+      expect(@fake.calls).to be_empty
+    end
+
+    it "rejects the same names on cluster-scoped find_cluster / patch_cluster / delete_cluster" do
+      [nil, "", ".", ".."].each do |name|
+        expect { @ci.find_cluster(name) }.to raise_error(ArgumentError)
+        expect { @ci.patch_cluster(name, []) }.to raise_error(ArgumentError)
+        expect { @ci.delete_cluster(name) }.to raise_error(ArgumentError)
+      end
+      expect(@fake.calls).to be_empty
+    end
+
+    it "keeps the readonly gate ahead of name validation (delete(nil) on readonly → ReadOnlyError)" do
+      expect { @wf.delete(nil) }.to raise_error(K8sRails::ReadOnlyError)
+      expect(@fake.calls).to be_empty
+    end
+
+    it "keeps the scope gate ahead of name validation (delete_cluster(nil) on namespaced → scope ArgumentError)" do
+      expect { @wf.delete_cluster(nil) }.to raise_error(ArgumentError, /scope: :cluster declaration/)
+      expect(@fake.calls).to be_empty
+    end
+
+    it "still performs normal individual CRUD with valid names" do
+      @pod.delete("pod-1")
+      @pod.find("pod-1")
+      @ci.delete_cluster("ci-1")
+      expect(@fake.calls).to eq([
+                                  [:DELETE, "/api/v1/namespaces/default/pods/pod-1", nil],
+                                  [:GET, "/api/v1/namespaces/default/pods/pod-1", nil],
+                                  [:DELETE, "/apis/cert-manager.io/v1/clusterissuers/ci-1", nil]
+                                ])
+    end
+  end
 end

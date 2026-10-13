@@ -33,7 +33,7 @@ module K8sRails
 
       # One object by name. Raises K8sRails::NotFound when absent.
       def find(name, namespace: resolved_namespace)
-        run_operation(:find, :namespaced, namespace: namespace) do
+        run_operation(:find, :namespaced, namespace: namespace, object_name: name) do
           transport.get(group_name, version_name, namespace, plural_name, name)
         end
       end
@@ -54,7 +54,7 @@ module K8sRails
 
       # JSON Patch a named object. Same readonly restriction as `create`.
       def patch(name, operations, namespace: resolved_namespace)
-        run_operation(:patch, :namespaced, namespace: namespace, writable: true) do
+        run_operation(:patch, :namespaced, namespace: namespace, writable: true, object_name: name) do
           transport.patch(group_name, version_name, namespace, plural_name, name, operations)
         end
       end
@@ -62,7 +62,7 @@ module K8sRails
       # Delete a named object; returns the API status object. Same readonly
       # restriction; raises NotFound when already gone.
       def delete(name, namespace: resolved_namespace)
-        run_operation(:delete, :namespaced, namespace: namespace, writable: true) do
+        run_operation(:delete, :namespaced, namespace: namespace, writable: true, object_name: name) do
           transport.delete(group_name, version_name, namespace, plural_name, name)
         end
       end
@@ -77,7 +77,7 @@ module K8sRails
 
       # One cluster-scoped object by name. Raises NotFound when absent.
       def find_cluster(name)
-        run_operation(:find, :cluster) do
+        run_operation(:find, :cluster, object_name: name) do
           transport.get_cluster(group_name, version_name, plural_name, name)
         end
       end
@@ -98,26 +98,28 @@ module K8sRails
 
       # JSON Patch a cluster-scoped object. Same readonly restriction.
       def patch_cluster(name, operations)
-        run_operation(:patch, :cluster, writable: true) do
+        run_operation(:patch, :cluster, writable: true, object_name: name) do
           transport.patch_cluster(group_name, version_name, plural_name, name, operations)
         end
       end
 
       # Delete a cluster-scoped object. Same readonly restriction as `delete`.
       def delete_cluster(name)
-        run_operation(:delete, :cluster, writable: true) do
+        run_operation(:delete, :cluster, writable: true, object_name: name) do
           transport.delete_cluster(group_name, version_name, plural_name, name)
         end
       end
 
       private
 
-      # Scope gate + readonly gate (§5.3) + §8 instrumentation for every
-      # operation. The block value (and any K8sRails exception) flows through
-      # unchanged. Cluster-scoped operations carry no namespace.
-      def run_operation(operation, scope, namespace: nil, writable: false, &block)
+      # Scope gate + readonly gate (§5.3) + object-name validation (#28) +
+      # §8 instrumentation for every operation. The block value (and any
+      # K8sRails exception) flows through unchanged. Cluster-scoped
+      # operations carry no namespace. Gate order: scope → readonly → name.
+      def run_operation(operation, scope, namespace: nil, writable: false, object_name: nil, &block)
         scope == :cluster ? assert_cluster_scoped : assert_namespaced
         assert_writable if writable
+        assert_object_name(object_name) if %i[find patch delete].include?(operation)
         ns = scope == :cluster ? nil : namespace
         K8sRails.instrument(operation, instrument_meta(ns)) { block.call }
       end
@@ -138,11 +140,21 @@ module K8sRails
         raise ReadOnlyError, "#{kind_name} is declared readonly — create/patch/delete are disabled (K4)"
       end
 
+      # Object-scoped operations (find/patch/delete) must reject an invalid
+      # target name BEFORE any request is built (#28): a nil name resolves to
+      # the collection URL, where a DELETE is a Delete Collection call, and
+      # "." / ".." are normalized away by the HTTP client into a different
+      # resource path.
+      def assert_object_name(name)
+        return unless name.nil? || name.to_s.empty? || %w[. ..].include?(name.to_s)
+
+        raise ArgumentError, "#{kind_name} object name must be a non-empty string (got #{name.inspect})"
+      end
+
       def assert_cluster_scoped
         return if cluster_scoped?
 
-        raise ArgumentError,
-              "#{kind_name} is namespaced — *_cluster methods require a scope: :cluster declaration"
+        raise ArgumentError, "#{kind_name} is namespaced — *_cluster methods require a scope: :cluster declaration"
       end
 
       def assert_namespaced
