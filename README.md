@@ -247,7 +247,7 @@ operations that the same injection serves.
 
 ```
 K8sRails::Error < StandardError
-├── K8sRails::Unavailable   # transport-layer failure (DNS/timeout/connection refused; kruby 1.36.x reports it as ApiError code 0)
+├── K8sRails::Unavailable   # connection-level failure: transport (DNS/timeout/connection refused — kruby 1.36.x reports these as ApiError code 0) and kubeconfig load failures (original Kubernetes::ConfigError kept as #cause)
 ├── K8sRails::NotFound      # HTTP 404
 ├── K8sRails::ApiError      # other API errors (401/403/409/422/5xx); holds #code and #response
 ├── K8sRails::ReadOnlyError      # create/patch/delete called on a readonly: true declaration

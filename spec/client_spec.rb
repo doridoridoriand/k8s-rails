@@ -311,10 +311,12 @@ RSpec.describe K8sRails::Client do
         .to raise_error(K8sRails::NotFound)
     end
 
-    it "converts kruby ApiError code 0 to K8sRails::Unavailable" do
+    it "converts kruby ApiError code 0 to K8sRails::Unavailable (with the original as cause)" do
       with_raising_transport(Kubernetes::ApiError.new(code: 0, message: "Could not resolve host"))
       expect { K8sRails.client.list("g", "v", "n", "p") }
-        .to raise_error(K8sRails::Unavailable, /Could not resolve host/)
+        .to raise_error(K8sRails::Unavailable, /Could not resolve host/) do |e|
+          expect(e.cause).to be_a(Kubernetes::ApiError)
+        end
     end
 
     it "converts kruby ApiError 403 to K8sRails::ApiError keeping code and body" do
@@ -346,6 +348,59 @@ RSpec.describe K8sRails::Client do
   end
 
   # --- Test injection -------------------------------------------------------
+
+  # #30: the kubeconfig load (KUBECONFIG -> ~/.kube/config -> in-cluster)
+  # happens in build_configuration, BEFORE any request — a broken kubeconfig
+  # must surface as the public Unavailable (same contract as the
+  # transport-time conversion), with the original error as #cause. The rescue
+  # is narrow: programming errors still propagate (see the NoMethodError spec
+  # in "exception conversion" above).
+  describe "config load-time conversion (#30)" do
+    def with_bad_kubeconfig
+      kubeconfig = Tempfile.new(["k8s-rails-spec-kubeconfig", ".yaml"])
+      kubeconfig.write(<<~YAML)
+        apiVersion: v1
+        kind: Config
+        current-context: missing
+        contexts: []
+        clusters: []
+        users: []
+      YAML
+      kubeconfig.close
+      kubeconfig
+    end
+
+    def with_kubeconfig(path)
+      old_kubeconfig = ENV["KUBECONFIG"]
+      ENV["KUBECONFIG"] = path
+      yield
+    ensure
+      ENV["KUBECONFIG"] = old_kubeconfig
+    end
+
+    it "converts a kubeconfig load failure to Unavailable on Resource.list (raw ConfigError must not leak)" do
+      kubeconfig = with_bad_kubeconfig
+      with_kubeconfig(kubeconfig.path) do
+        wf = K8sRails.crd(group: "", version: "v1", plural: "pods", kind: "Pod")
+        error = nil
+        expect { wf.list }.to raise_error(K8sRails::Unavailable) { |e| error = e }
+        expect(error.cause).to be_a(Kubernetes::ConfigError)
+      end
+    ensure
+      kubeconfig.unlink
+    end
+
+    it "converts the same load failure on connected?" do
+      kubeconfig = with_bad_kubeconfig
+      with_kubeconfig(kubeconfig.path) do
+        error = nil
+        expect { K8sRails.connected? }.to raise_error(K8sRails::Unavailable) { |e| error = e }
+        expect(error.cause).to be_a(Kubernetes::ConfigError)
+      end
+    ensure
+      kubeconfig.unlink
+    end
+  end
 
   describe "config.api_client injection" do
     it "skips connection resolution and uses the injected transport" do

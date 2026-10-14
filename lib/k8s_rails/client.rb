@@ -113,8 +113,18 @@ module K8sRails
         Kubernetes::ApiClient.new(config)
       end
 
+      # Resolve the connection configuration. The kubeconfig load happens HERE
+      # (kruby's default_config reads KUBECONFIG -> ~/.kube/config ->
+      # in-cluster, design §5.2), so a broken kubeconfig / missing context
+      # surfaces at build time — BEFORE any request. Convert it to the public
+      # exception tree with the original error as `cause` (#30), matching the
+      # transport-time conversion in StringKeyedAdapter#request /
+      # VersionApiProbe#probe. The rescue is deliberately narrow: programming
+      # errors must not be swallowed (design §5.4).
       def build_configuration
         K8sRails.config.connection || Kubernetes::Configuration.default_config
+      rescue Kubernetes::ConfigError => e
+        raise Unavailable, "K8s に接続できません: #{e.message}"
       end
 
       # K1 bridge (kruby 1.36.x quirk): InClusterConfig writes the Bearer token
