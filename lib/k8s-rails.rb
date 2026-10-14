@@ -80,17 +80,24 @@ module K8sRails
     # The notification payload is
     #   { operation:, group:, version:, plural:, namespace:, duration_ms:,
     #     status: "ok" | "unavailable" | "api_error" }.
-    # The block's return value always flows through unchanged. No-op when
-    # `config.instrumentation` is false or ActiveSupport is not loaded.
+    # The API call runs INSIDE the ActiveSupport notification block (#32), so
+    # the standard start/finish times bracket the real processing
+    # (`Event#duration` measures it) and failures carry the standard
+    # `exception` / `exception_object` metadata alongside the custom `status`.
+    # `status` / `duration_ms` are set in the block's `ensure` so the finish
+    # event already carries them. The block's return value always flows
+    # through unchanged. No-op when `config.instrumentation` is false or
+    # ActiveSupport is not loaded.
     # rubocop:disable Metrics/AbcSize, Metrics/MethodLength -- fixed §8 wrapper
     def instrument(operation, metadata)
       return yield unless instrumentation_enabled?
 
       payload = { operation: operation }.merge(metadata)
       started = Process.clock_gettime(Process::CLOCK_MONOTONIC)
-      begin
+      ActiveSupport::Notifications.instrument("k8s-rails.request", payload) do
         result = yield
         payload[:status] = "ok"
+        result
       rescue K8sRails::Unavailable
         payload[:status] = "unavailable"
         raise
@@ -101,12 +108,11 @@ module K8sRails
         # Fallback for exceptions outside the K8sRails hierarchy (e.g. a
         # programming error like NoMethodError from a malformed stub): keep
         # the documented status enum (ok/unavailable/api_error) intact while
-        # re-raising the original exception.
+        # re-raising the original exception (ActiveSupport attaches its
+        # standard `exception` / `exception_object` metadata on this path).
         payload[:status] ||= "api_error"
         payload[:duration_ms] = ((Process.clock_gettime(Process::CLOCK_MONOTONIC) - started) * 1_000).round(2)
-        ActiveSupport::Notifications.instrument("k8s-rails.request", payload)
       end
-      result
     end
     # rubocop:enable Metrics/AbcSize, Metrics/MethodLength
 
