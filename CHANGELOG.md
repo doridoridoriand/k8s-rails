@@ -18,8 +18,14 @@ All notable changes to `k8s-rails` are documented in this file.
   every request (kruby calls `auth_settings` per request, which is exactly
   where kruby's in-cluster token-refresh hook runs). Long-running processes
   using an in-cluster ServiceAccount token now pick up rotated tokens
-  without rebuilding the client. A `BearerToken` set explicitly by the
-  application is never bridged or overwritten.
+  without rebuilding the client. The token sent by a request is taken from
+  the value refreshed on that same call and is never re-read from the
+  shared configuration afterwards, so concurrent requests in a threaded
+  process cannot send a stale copy. A `BearerToken` set explicitly by the
+  application is never bridged or overwritten: before client creation the
+  bridge is not installed, and if the app replaces the value after the
+  client exists (explicit credential rotation), the bridge stops syncing
+  and the app's value stays authoritative.
 
 ## 0.3.1
 

@@ -337,8 +337,14 @@ its client (the design document calls this the "K1 bridge"). The copy is not
 frozen: the bridge re-syncs `BearerToken` from `authorization` on every
 request (kruby calls `auth_settings` per request, which is exactly where
 kruby's in-cluster token-refresh hook runs), so a rotated ServiceAccount
-token reaches long-running processes without rebuilding the client. An
-already-set `BearerToken` is never bridged or overwritten. If you see 401s
+token reaches long-running processes without rebuilding the client. The
+token sent by a request is taken from the value refreshed on that same call
+and is never re-read from the shared configuration afterwards, so concurrent
+requests in a threaded process cannot send a stale copy. A `BearerToken` set
+by your application is never bridged or overwritten — before client creation
+the bridge is simply not installed, and if your app replaces the value after
+the client exists (explicit credential rotation), the bridge detects the
+override, stops syncing, and your value stays authoritative. If you see 401s
 from a cluster connection that relies on kruby's own configuration behavior
 (outside this gem), check this token-key issue first.
 

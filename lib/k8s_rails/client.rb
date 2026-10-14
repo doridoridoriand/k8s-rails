@@ -129,28 +129,69 @@ module K8sRails
       # copy, a module is prepended to the resolved config's singleton class
       # that re-syncs the bridged `BearerToken` from the upstream key on every
       # `auth_settings` call — kruby calls it for every request, so a rotated
-      # token reaches the header without rebuilding the client. A `BearerToken`
-      # set by the user is neither bridged nor overwritten.
+      # token reaches the header without rebuilding the client.
+      #
+      # The bridge tracks the value it last wrote
+      # (`@k8s_rails_bridged_bearer_value`). If the app replaces
+      # `api_key['BearerToken']` after client creation (explicit credential
+      # rotation), the current value matches neither the bridge's last write
+      # nor the value the bridge is about to write, so the bridge stops
+      # syncing and the app's value stays authoritative — a user-set
+      # `BearerToken` is never bridged or overwritten, before or after client
+      # creation.
       def bridge_bearer_token(config)
         return if config.api_key["authorization"].nil?
         return if config.api_key.key?("BearerToken")
         return if config.instance_variable_get(:@k8s_rails_bridged_bearer)
 
-        config.api_key["BearerToken"] = config.api_key_with_prefix("authorization")
+        initial = config.api_key_with_prefix("authorization")
+        config.api_key["BearerToken"] = initial
         config.instance_variable_set(:@k8s_rails_bridged_bearer, true)
+        config.instance_variable_set(:@k8s_rails_bridged_bearer_value, initial)
         config.singleton_class.prepend(BridgedBearerSync)
       end
 
       # Prepend target of the K1 bridge (see bridge_bearer_token). kruby calls
       # `auth_settings` for every request; syncing here (not once at build
       # time) is what keeps a rotated in-cluster token fresh.
+      #
+      # Thread-safety: the token for THIS request is taken from the freshly
+      # computed `authorization` value and written into THIS call's returned
+      # settings hash directly — it is never read back from the shared
+      # `api_key` (where a concurrent request's write could land in between),
+      # so concurrent requests in a threaded Rails process cannot send a
+      # stale copy. The shared key is still updated as the backing copy for
+      # direct readers.
       module BridgedBearerSync
         def auth_settings
-          if instance_variable_get(:@k8s_rails_bridged_bearer)
-            fresh = api_key_with_prefix("authorization")
-            api_key["BearerToken"] = fresh unless fresh.nil?
-          end
-          super
+          settings = super
+          sync_bridged_bearer(settings)
+          settings
+        end
+
+        private
+
+        def sync_bridged_bearer(settings)
+          return unless instance_variable_get(:@k8s_rails_bridged_bearer)
+
+          fresh = api_key_with_prefix("authorization")
+          return if fresh.nil?
+          return if app_overrode_bridged_token?(fresh)
+
+          settings["BearerToken"][:value] = fresh
+          api_key["BearerToken"] = fresh
+          instance_variable_set(:@k8s_rails_bridged_bearer_value, fresh)
+        end
+
+        # The app replaced the bridged value (explicit credential rotation):
+        # it matches neither the bridge's last write nor the value written
+        # now. Stops the sync so the app's credential stays authoritative.
+        def app_overrode_bridged_token?(fresh)
+          current = api_key["BearerToken"]
+          return false if current == instance_variable_get(:@k8s_rails_bridged_bearer_value) || current == fresh
+
+          instance_variable_set(:@k8s_rails_bridged_bearer, false)
+          true
         end
       end
     end

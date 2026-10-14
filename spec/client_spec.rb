@@ -78,6 +78,58 @@ RSpec.describe K8sRails::Client do
       expect(kconfig.auth_settings["BearerToken"][:value]).to eq("Bearer user-set")
     end
 
+    # PR #36 review (Codex P2): a BearerToken replaced by the application
+    # AFTER client creation (explicit credential rotation) must reach the
+    # header — the per-request re-sync must not clobber it — and the bridge
+    # must stop syncing so the app's value stays authoritative.
+    it "honors a BearerToken replaced after client creation and stops syncing" do
+      kconfig = Kubernetes::Configuration.new
+      kconfig.api_key["authorization"] = "Bearer in-cluster"
+      K8sRails.config.connection = kconfig
+
+      K8sRails.client
+      expect(kconfig.api_key["BearerToken"]).to eq("Bearer in-cluster")
+
+      # App-side rotation after the client exists.
+      kconfig.api_key["BearerToken"] = "Bearer app-rotated"
+
+      expect(kconfig.auth_settings["BearerToken"][:value]).to eq("Bearer app-rotated")
+
+      # Upstream in-cluster rotation must not clobber the app's value.
+      kconfig.api_key["authorization"] = "Bearer in-cluster-v2"
+      expect(kconfig.auth_settings["BearerToken"][:value]).to eq("Bearer app-rotated")
+      expect(kconfig.api_key["BearerToken"]).to eq("Bearer app-rotated")
+    end
+
+    # PR #36 review (Copilot): the token for a request must be the value
+    # computed on that call, even when a concurrent request's stale write to
+    # the shared key lands between this call's reads (threaded Rails). This
+    # simulates that interleaving deterministically: the shared key is
+    # clobbered with the pre-rotation token the moment `super` reads it.
+    # On the pre-fix code (sync writes, then `super` re-reads the shared key)
+    # the returned settings carry the stale token and this test fails.
+    it "serves the freshly computed token without re-reading the shared key" do
+      kconfig = Kubernetes::Configuration.new
+      kconfig.api_key["authorization"] = "Bearer t1"
+      K8sRails.config.connection = kconfig
+
+      K8sRails.client
+      kconfig.api_key["authorization"] = "Bearer t2" # upstream rotation
+
+      clobber = Module.new do
+        define_method(:api_key_with_prefix) do |name, param_alias = nil|
+          if name == "BearerToken" && @sim_clobbered != true
+            @api_key["BearerToken"] = "Bearer t1" # concurrent stale write
+            @sim_clobbered = true
+          end
+          super(name, param_alias)
+        end
+      end
+      kconfig.singleton_class.prepend(clobber)
+
+      expect(kconfig.auth_settings["BearerToken"][:value]).to eq("Bearer t2")
+    end
+
     # End-to-end on the REAL transport path (kruby ApiClient + Typhoeus):
     # an in-cluster token file rotation, with the refresh deadline expired,
     # must reach the Authorization header on the NEXT request — same cached
