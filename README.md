@@ -278,6 +278,12 @@ k8s-rails.request
              status: "ok" | "unavailable" | "api_error" }
 ```
 
+The API call runs inside the standard notification block, so the event's
+start/finish times bracket the real processing (`Event#duration` reports the
+actual call duration) and a failure attaches the standard
+`exception` / `exception_object` metadata next to the custom `status`. The
+finish event payload always carries `status` and `duration_ms`.
+
 In a Rails app you can subscribe with `ActiveSupport::Notifications`:
 
 ```ruby

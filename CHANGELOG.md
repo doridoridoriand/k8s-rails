@@ -26,6 +26,18 @@ All notable changes to `k8s-rails` are documented in this file.
   bridge is not installed, and if the app replaces the value after the
   client exists (explicit credential rotation), the bridge stops syncing
   and the app's value stays authoritative.
+- **`k8s-rails.request` notifications now use the standard ActiveSupport block
+  form** (#32): the API call runs inside
+  `ActiveSupport::Notifications.instrument`, so the standard start/finish
+  times bracket the real processing
+  (`ActiveSupport::Notifications::Event#duration` now reports the actual call
+  duration — previously the event was emitted after the call, so the standard
+  duration was ~0) and failures carry the standard
+  `exception` / `exception_object` metadata. The custom §8 payload
+  (`operation` / resource coordinates / `duration_ms` / closed `status` enum)
+  and the no-op / return-value contracts are unchanged; `status` and
+  `duration_ms` are set in the block's `ensure`, so the finish event payload
+  always carries them and the original exception is still re-raised.
 
 ## 0.3.1
 

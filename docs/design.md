@@ -1,7 +1,7 @@
 # k8s-rails 設計書
 
 - 文書番号: KBR-DESIGN-001
-- 版: 0.1.17（案）
+- 版: 0.1.18（案）
 - 日付: 2026-10-14
 - 対象リポジトリ: k8s-rails（本設計の実装先）
 - ライセンス: MIT（LICENSE は main に既存）
@@ -340,6 +340,19 @@ k8s-rails.request  payload: { operation: :list, group:, version:, plural:, names
   `operation` は **symbol**。例外は notification を発した上で **そのまま raise**
   される（計測は swallow しない）。
 
+- **API 処理は `ActiveSupport::Notifications.instrument` のブロック内で実行される**（#32）。
+  標準の開始・終了時刻が実処理を挟むため、標準の
+  `ActiveSupport::Notifications::Event#duration` が実処理時間を反映する（旧実装は
+  実処理の後にブロックなしで発行していたため標準 duration はほぼ 0 だった）。購読者が
+  受信するのは finish イベント（裸名 `k8s-rails.request` を購読した場合、1 呼び出しに
+  つき 1 イベント — AS 8.1.3.1 実測）で、`status` / `duration_ms` はブロックの
+  `ensure` 内で設定されるため finish イベントの payload に常に含まれる。
+  失敗時は `status` に加えて ActiveSupport 標準の `exception`
+  （`[クラス名, メッセージ]`）と `exception_object`（例外オブジェクト・再送出される
+  元例外と同一）が payload に付与される。K8sRails 例外階層外の例外
+  （プログラミングエラー等）も `status` フォールバック `"api_error"` と標準メタデータの
+  両方が付く。
+
 - Rails アプリではこの notification を `ActiveSupport::Notifications` /
   `log_subscription` で拾える（ログ・ダッシュボード表示）。
 - ActiveSupport 無い環境（または `instrumentation: false`）では no-op。
@@ -470,3 +483,4 @@ PR の差分を最小化）。
 | 0.1.15 | 2026-09-22 | v0.3.0 リリース準備: ①`VERSION` を 0.2.1 → **0.3.0**（version.rb + version spec）②CHANGELOG の `Unreleased` を **0.3.0** に確定③README の install pin（`~> 0.2` → `~> 0.3`）・`VERSION` 例・Roadmap 見出し（v0.3+ → v0.4+）を同期④§10 リリース計画表で v0.3 行を「実際にリリースした内容」に書き換え（unified REST transport / delete / README 改稿）、旧 v0.3 予定内容（watch / kind E2E / matrix 追加）を v0.4 へ、リトライポリシーを v0.4 へ、複数クラスタ展望を v0.5 へ移動⑤§2.2 / §9 / §13 の旧「v0.3 対象」参照を v0.4 に修正 | 実装反映済み |
 | 0.1.16 | 2026-09-22 | v0.3.1 リリース準備: gemspec の `summary` / `description` 文言更新（PR #25）を**公開 gem として反映するための docs みのパッチリリース**。公開済み gem の文言は公開後に変更できない（RubyGems に gem メタの編集 API / UI なし）ため、0.3.1 の公開で RubyGems ページ表示が新文言に切り替わる。①`VERSION` を 0.3.0 → **0.3.1**（version.rb + version spec）②CHANGELOG に 0.3.1 セクション追加③README の `VERSION` 例・§3 ツリーコメントを同期。**コード・挙動の変更なし** | 実装反映済み |
 | 0.1.17 | 2026-10-13 | Issue #28–#29 対応（両方 priority:high・v0.4 予定）: ①#28 `find` / `patch` / `delete`（cluster 版を含む）が無効な対象名（`nil` / 空文字列 / `.` / `..`）を**通信前に** `ArgumentError` で拒否（従来 `delete(nil)` は Delete Collection URL を生成し一括削除リスク、`.` / `..` は HTTP クライアントのパス正規化で送信先が変化。ゲート順は scope → readonly → 名検証・計測より前）。§5.3 / README に明記②#29 K1 ブリッジを「初回コピー」から「全 `auth_settings` 呼び出し（全リクエスト）で再同期」に改訂: kruby 1.36.x の in-cluster 更新フックは `api_key_with_prefix("authorization")` 呼び出し時のみ発火するため、初回コピー固定では ServiceAccount トークンローテーションが反映されず長時間稼働プロセスで 401 が続く問題を実修正。解決済み config の singleton class に sync モジュールを prepend。ユーザー明示設定の `BearerToken` はブリッジ・上書きしない（区別マーカー付き）。§5.2 / §7（上げ替えチェックリスト）/ README を同期③PR #36 レビュー対応: (a) 送出トークンを「共有 `api_key` 書き戻し後 `super` が再読みなし」に変更 — `super` が先に per-call settings を構築し、当該呼び出しで新規取得した `authorization` 値をその戻り値ハッシュに直接書き込む（スレッド環境で並行リクエストの stale 書き込みが挟んでも stale トークンを送出しない）(b) ブリッジが最後に書いた値を追跡（`@k8s_rails_bridged_bearer_value`）し、app が client 生成後に `BearerToken` を置き換えた場合は同期を恒久的に停止して app 側の値を権威とする（「上書きしない」保証を生成後の上書きまで拡張）| 実装反映済み |
+| 0.1.18 | 2026-10-14 | Issue #32 対応: `k8s-rails.request` 通知を **ActiveSupport ブロック形式に移行**（API 処理を `ActiveSupport::Notifications.instrument` のブロック内で実行）。①標準 start/finish が実処理を挟み `Event#duration` が実処理時間を反映（旧実装は実処理後に発行し標準 duration はほぼ 0 だった）②失敗時に標準 `exception` / `exception_object` メタデータが付与（`status` / `duration_ms` はブロック `ensure` で設定され finish イベントに常に含まれる。元例外はそのまま再送出）③既存 payload 契約（operation / 座標 / duration_ms / status 列挙）・no-op・戻り値契約は不変。AS 8.1.3.1 実測: 裸名購読者は finish イベント 1 件のみ受信（§8）。※版数 0.1.17 は PR #36（#28/#29）が使用 | 実装反映済み |
