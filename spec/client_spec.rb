@@ -3,6 +3,7 @@
 require "spec_helper"
 # Client (and kruby) load lazily; pull it in for these tests.
 require "k8s_rails/client"
+require "tempfile"
 
 RSpec.describe K8sRails::Client do
   before { K8sRails.reset! }
@@ -38,6 +39,150 @@ RSpec.describe K8sRails::Client do
       K8sRails.client
 
       expect(kconfig.api_key.key?("BearerToken")).to be(false)
+    end
+  end
+
+  # --- K1 bridge refresh (#29) ----------------------------------------------
+
+  describe "K1 bridge refresh (rotated tokens reach the header, #29)" do
+    it "re-syncs the bridged BearerToken on every auth_settings call (per request), same cached client" do
+      kconfig = Kubernetes::Configuration.new
+      kconfig.api_key["authorization"] = "Bearer old-token"
+      K8sRails.config.connection = kconfig
+
+      first = K8sRails.client
+      expect(kconfig.api_key["BearerToken"]).to eq("Bearer old-token")
+
+      # Simulate an upstream refresh (kruby's in-cluster hook rewrites this
+      # key inside api_key_with_prefix("authorization")).
+      kconfig.api_key["authorization"] = "Bearer new-token"
+
+      # The SAME cached client — no rebuild. kruby calls auth_settings for
+      # every request; that is where the bridge re-syncs (before the header
+      # is assembled), so read auth_settings first.
+      expect(K8sRails.client).to equal(first)
+      expect(kconfig.auth_settings["BearerToken"][:value]).to eq("Bearer new-token")
+      expect(kconfig.api_key["BearerToken"]).to eq("Bearer new-token")
+    end
+
+    it "never overwrites a user-set BearerToken, even after upstream rotation" do
+      kconfig = Kubernetes::Configuration.new
+      kconfig.api_key["authorization"] = "Bearer from-auth"
+      kconfig.api_key["BearerToken"] = "Bearer user-set"
+      K8sRails.config.connection = kconfig
+
+      K8sRails.client
+      kconfig.api_key["authorization"] = "Bearer rotated"
+
+      expect(kconfig.api_key["BearerToken"]).to eq("Bearer user-set")
+      expect(kconfig.auth_settings["BearerToken"][:value]).to eq("Bearer user-set")
+    end
+
+    # PR #36 review (Codex P2): a BearerToken replaced by the application
+    # AFTER client creation (explicit credential rotation) must reach the
+    # header — the per-request re-sync must not clobber it — and the bridge
+    # must stop syncing so the app's value stays authoritative.
+    it "honors a BearerToken replaced after client creation and stops syncing" do
+      kconfig = Kubernetes::Configuration.new
+      kconfig.api_key["authorization"] = "Bearer in-cluster"
+      K8sRails.config.connection = kconfig
+
+      K8sRails.client
+      expect(kconfig.api_key["BearerToken"]).to eq("Bearer in-cluster")
+
+      # App-side rotation after the client exists.
+      kconfig.api_key["BearerToken"] = "Bearer app-rotated"
+
+      expect(kconfig.auth_settings["BearerToken"][:value]).to eq("Bearer app-rotated")
+
+      # Upstream in-cluster rotation must not clobber the app's value.
+      kconfig.api_key["authorization"] = "Bearer in-cluster-v2"
+      expect(kconfig.auth_settings["BearerToken"][:value]).to eq("Bearer app-rotated")
+      expect(kconfig.api_key["BearerToken"]).to eq("Bearer app-rotated")
+    end
+
+    # PR #36 review (Copilot): the token for a request must be the value
+    # computed on that call, even when a concurrent request's stale write to
+    # the shared key lands between this call's reads (threaded Rails). This
+    # simulates that interleaving deterministically: the shared key is
+    # clobbered with the pre-rotation token the moment `super` reads it.
+    # On the pre-fix code (sync writes, then `super` re-reads the shared key)
+    # the returned settings carry the stale token and this test fails.
+    it "serves the freshly computed token without re-reading the shared key" do
+      kconfig = Kubernetes::Configuration.new
+      kconfig.api_key["authorization"] = "Bearer t1"
+      K8sRails.config.connection = kconfig
+
+      K8sRails.client
+      kconfig.api_key["authorization"] = "Bearer t2" # upstream rotation
+
+      clobber = Module.new do
+        define_method(:api_key_with_prefix) do |name, param_alias = nil|
+          if name == "BearerToken" && @sim_clobbered != true
+            @api_key["BearerToken"] = "Bearer t1" # concurrent stale write
+            @sim_clobbered = true
+          end
+          super(name, param_alias)
+        end
+      end
+      kconfig.singleton_class.prepend(clobber)
+
+      expect(kconfig.auth_settings["BearerToken"][:value]).to eq("Bearer t2")
+    end
+
+    # End-to-end on the REAL transport path (kruby ApiClient + Typhoeus):
+    # an in-cluster token file rotation, with the refresh deadline expired,
+    # must reach the Authorization header on the NEXT request — same cached
+    # client, no rebuild. A local loopback HTTP server captures the header.
+    it "sends the rotated in-cluster token after the refresh deadline (local HTTP server)" do
+      token_file = Tempfile.new(["k8s-rails-spec-token", ".txt"])
+      ca_file = Tempfile.new(["k8s-rails-spec-ca", ".txt"])
+      token_file.write("review-old-token")
+      token_file.flush
+      server = LocalHttpServer.new(requests: 3).start
+      loader = Kubernetes::InClusterConfig.new
+      loader.instance_variable_set(:@env, {
+                                     "KUBERNETES_SERVICE_HOST" => "127.0.0.1",
+                                     "KUBERNETES_SERVICE_PORT" => server.port.to_s
+                                   })
+      loader.instance_variable_set(:@token_file, token_file.path)
+      loader.instance_variable_set(:@ca_cert, ca_file.path)
+      config = Kubernetes::Configuration.new
+      loader.configure(config)
+      # configure() forces https + the CA file; the auth path under test is
+      # identical over plain http, so point the same config at the server.
+      config.scheme = "http"
+      config.ssl_ca_cert = nil
+      K8sRails.config.connection = config
+      pod = K8sRails.crd(group: "", version: "v1", plural: "pods", kind: "Pod")
+
+      begin
+        pod.find("p-1")
+        expect(server.authorization_headers.last).to eq("Bearer review-old-token")
+
+        # Rotate the token file and expire the refresh deadline: kruby's
+        # hook must reload the file on the next api_key_with_prefix("authorization").
+        token_file.rewind
+        token_file.truncate(0)
+        token_file.write("review-new-token")
+        token_file.flush
+        loader.token_expires_at = Time.now - 1
+
+        pod.find("p-1")
+        expect(server.authorization_headers.last).to eq("Bearer review-new-token")
+
+        # connected? (VersionApi probe) shares the config → the same fresh
+        # token (Resource operations and connectivity check agree, #29).
+        expect(K8sRails.connected?).to be(true)
+        expect(server.authorization_headers.last).to eq("Bearer review-new-token")
+      ensure
+        server.stop
+        # Keep the token file alive for the rest of the suite: InClusterConfig
+        # installs a process-wide refresh hook on Kubernetes::Configuration
+        # (kruby design) that would re-read this file if it expired mid-suite.
+        # Pushing the deadline far out makes the installed hook inert.
+        loader.token_expires_at = Time.now + 3600
+      end
     end
   end
 

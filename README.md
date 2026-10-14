@@ -182,6 +182,13 @@ declaration (the `*_cluster` methods take no `namespace:`).
 `ArgumentError`). Writes (`create` / `patch` / `delete`) are enabled **only**
 by `readonly: false`, so a missing flag can never fail open.
 
+Object-name arguments of `find` / `find_or_nil` / `patch` / `delete` (and
+their `*_cluster` counterparts) are validated **before any request is
+issued**: `nil`, an empty string, `"."` or `".."` raise `ArgumentError`.
+This keeps `delete(nil)` from degrading into a Delete Collection call
+against the whole collection, and keeps `"."` / `".."` from being normalized
+away by the HTTP client into a different resource path.
+
 ### Cluster-scoped resources
 
 Both namespaced and cluster-scoped resources are supported. Declare a
@@ -326,11 +333,20 @@ not match, **the Authorization header ends up empty and requests fail with
 401** when using kruby's configuration directly.
 
 k8s-rails automatically copies `authorization` to `BearerToken` when building
-its client (the design document calls this the "K1 bridge"), so connections
-through k8s-rails are unaffected (it does not overwrite an already-set
-`BearerToken`). If you see 401s from a cluster connection that relies on
-kruby's own configuration behavior (outside this gem), check this token-key
-issue first.
+its client (the design document calls this the "K1 bridge"). The copy is not
+frozen: the bridge re-syncs `BearerToken` from `authorization` on every
+request (kruby calls `auth_settings` per request, which is exactly where
+kruby's in-cluster token-refresh hook runs), so a rotated ServiceAccount
+token reaches long-running processes without rebuilding the client. The
+token sent by a request is taken from the value refreshed on that same call
+and is never re-read from the shared configuration afterwards, so concurrent
+requests in a threaded process cannot send a stale copy. A `BearerToken` set
+by your application is never bridged or overwritten — before client creation
+the bridge is simply not installed, and if your app replaces the value after
+the client exists (explicit credential rotation), the bridge detects the
+override, stops syncing, and your value stays authoritative. If you see 401s
+from a cluster connection that relies on kruby's own configuration behavior
+(outside this gem), check this token-key issue first.
 
 ## Roadmap (v0.4+)
 

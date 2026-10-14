@@ -2,6 +2,31 @@
 
 All notable changes to `k8s-rails` are documented in this file.
 
+## Unreleased
+
+- **`find` / `patch` / `delete` (and `*_cluster`) reject invalid target names
+  before any request is issued** (#28): `nil`, an empty string, `"."` or
+  `".."` raise `ArgumentError`. Previously `delete(nil)` built the
+  collection URL, which is a Delete Collection call — an unintended bulk
+  delete when the caller has the `deletecollection` permission; `"."` /
+  `".."` were normalized away by the HTTP client into a different resource
+  path. Gate order is unchanged: scope gate, then readonly gate, then name
+  validation (rejected calls are not instrumented).
+- **The K1 bearer-token bridge keeps a rotated token fresh** (#29): the
+  bridge no longer freezes the first copy of
+  `api_key['authorization']` → `api_key['BearerToken']`; it re-syncs on
+  every request (kruby calls `auth_settings` per request, which is exactly
+  where kruby's in-cluster token-refresh hook runs). Long-running processes
+  using an in-cluster ServiceAccount token now pick up rotated tokens
+  without rebuilding the client. The token sent by a request is taken from
+  the value refreshed on that same call and is never re-read from the
+  shared configuration afterwards, so concurrent requests in a threaded
+  process cannot send a stale copy. A `BearerToken` set explicitly by the
+  application is never bridged or overwritten: before client creation the
+  bridge is not installed, and if the app replaces the value after the
+  client exists (explicit credential rotation), the bridge stops syncing
+  and the app's value stays authoritative.
+
 ## 0.3.1
 
 - **Gemspec wording sync (RubyGems page text update)**: `summary` / `description`
