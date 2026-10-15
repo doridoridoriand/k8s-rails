@@ -206,6 +206,105 @@ RSpec.describe K8sRails::Client do
     end
   end
 
+  # #31: connected? must inspect the SAME connection the Resource operations
+  # use. The resolved config is memoized for the cached transport's lifetime —
+  # re-resolving would let the probe validate connection B while ops still
+  # send to connection A. reset! is the explicit reload path.
+  describe "connected? shares the cached connection with Resource ops (#31)" do
+    def local_config(server)
+      Kubernetes::Configuration.new.tap do |c|
+        c.host = "http://127.0.0.1:#{server.port}"
+      end
+    end
+
+    it "probes the cached config when the config resolution changes" do
+      server_a = LocalHttpServer.new(requests: 2).start
+      server_b = LocalHttpServer.new(requests: 2).start
+      config_a = local_config(server_a)
+      config_b = local_config(server_b)
+      allow(Kubernetes::Configuration).to receive(:default_config).and_return(config_a, config_b)
+      begin
+        K8sRails.client.list("g", "v", "n", "p")
+        K8sRails.connected?
+        expect(server_a.authorization_headers.size).to eq(2)
+        expect(server_b.authorization_headers.size).to eq(0)
+      ensure
+        server_a.stop
+        server_b.stop
+      end
+    end
+
+    it "applies the new config after reset! (explicit reload path)" do
+      server_a = LocalHttpServer.new(requests: 2).start
+      server_b = LocalHttpServer.new(requests: 2).start
+      config_a = local_config(server_a)
+      config_b = local_config(server_b)
+      allow(Kubernetes::Configuration).to receive(:default_config).and_return(config_a, config_b)
+      begin
+        K8sRails.client.list("g", "v", "n", "p")
+        K8sRails.reset!
+        K8sRails.client.list("g", "v", "n", "p")
+        K8sRails.connected?
+        expect(server_a.authorization_headers.size).to eq(1)
+        expect(server_b.authorization_headers.size).to eq(2)
+      ensure
+        server_a.stop
+        server_b.stop
+      end
+    end
+
+    # Deterministic concurrent-first-use regression (#31 review): with the
+    # fix, the FIRST resolution runs inside BUILD_LOCK, so a racing
+    # `connected?` cannot enter the resolution while the op thread holds it —
+    # the stub is entered exactly once and the probe reuses the SAME cached
+    # config. Without the lock both threads enter `build_configuration` and
+    # the second write wins (calls == 2 → failure), recreating the
+    # probe/operation mismatch. No sleeps: the op thread is PARKED inside the
+    # resolution until the test releases it, so the "blocked probe" state is
+    # a lock guarantee, not a timing window.
+    it "resolves the connection config exactly once when a build and connected? race" do
+      server_a = LocalHttpServer.new(requests: 2).start
+      server_b = LocalHttpServer.new(requests: 2).start
+      config_a = local_config(server_a)
+      config_b = local_config(server_b)
+      calls = 0
+      entered = Queue.new
+      release = Queue.new
+      allow(Kubernetes::Configuration).to receive(:default_config) do
+        calls += 1
+        entered << calls
+        release.pop
+        calls == 1 ? config_a : config_b
+      end
+
+      begin
+        op_thread = Thread.new { K8sRails.client.list("g", "v", "n", "p") }
+        entered.pop # the op thread is now parked inside the resolution
+
+        probe_thread = Thread.new { K8sRails.connected? }
+        # The probe cannot finish while the op holds BUILD_LOCK (it is either
+        # waiting on the lock or, without the fix, parked in the stub).
+        expect(probe_thread.join(0.2)).to be_nil
+        expect(calls).to eq(1)
+
+        release << nil # unpark the op thread: it takes config_a and caches it
+        op_thread.join(2)
+        probe_thread.join(2)
+
+        expect(server_a.authorization_headers.size).to eq(2)
+        expect(server_b.authorization_headers.size).to eq(0)
+        expect(calls).to eq(1)
+      ensure
+        2.times { release << nil } # unstick any thread parked in the stub
+        op_thread&.join(1)
+        probe_thread&.join(1)
+        server_a.stop
+        server_b.stop
+        K8sRails.reset!
+      end
+    end
+  end
+
   # --- Path building (core v1 vs named group, namespaced vs cluster) --------
 
   describe "API path building" do

@@ -34,6 +34,14 @@ module K8sRails
   # `Kubernetes::Configuration` and builds an in-memory `ApiClient`. The first
   # real call is where DNS/timeout/TLS can fail.
   class Client
+    # Serializes the first connection resolution + transport build (and
+    # `reset!`) so a concurrent Resource operation and `connected?` probe
+    # cannot resolve DIFFERENT configs (kubeconfig changing between the two
+    # resolutions would recreate the #31 probe/operation mismatch in a
+    # threaded process — `||=` alone is not atomic). The probe's HTTP I/O
+    # runs OUTSIDE the lock: only first-time resolution pays for it.
+    BUILD_LOCK = Mutex.new
+
     class << self
       # Return the shared transport, building it on first call (lazy connect).
       #
@@ -50,11 +58,13 @@ module K8sRails
       #   4. Wrap in a StringKeyedAdapter that normalizes responses (K2) and
       #      converts kruby errors to K8sRails exceptions.
       def build
-        @build ||= if (injected = K8sRails.config.api_client)
-                     StringKeyedAdapter.new(injected)
-                   else
-                     StringKeyedAdapter.new(build_api_client)
-                   end
+        BUILD_LOCK.synchronize do
+          @build ||= if (injected = K8sRails.config.api_client)
+                       StringKeyedAdapter.new(injected)
+                     else
+                       StringKeyedAdapter.new(build_api_client)
+                     end
+        end
       end
 
       # Lightweight connectivity probe (design §5.2). Performs one lightweight
@@ -69,16 +79,24 @@ module K8sRails
       def connected?
         return true if K8sRails.config.api_client
 
-        config = build_configuration
-        # The probe also authenticates — apply the K1 bridge or the Authorization
-        # header would be empty on clusters where /version requires auth.
-        bridge_bearer_token(config)
+        # Resolution + K1 bridge happen under BUILD_LOCK (one critical section
+        # with the transport build); only the probe's HTTP I/O stays outside.
+        config = BUILD_LOCK.synchronize do
+          resolved = resolved_connection_config
+          bridge_bearer_token(resolved)
+          resolved
+        end
         VersionApiProbe.new(config).probe
       end
 
-      # Reset cached connection + transport (test support, §5.1).
+      # Reset cached connection + transport (test support, §5.1). Also drops
+      # the cached resolved config so the next build/probe re-resolves (#31).
+      # Takes BUILD_LOCK so a reset cannot interleave with a build.
       def reset!
-        @build = nil
+        BUILD_LOCK.synchronize do
+          @build = nil
+          @resolved_connection_config = nil
+        end
       end
 
       # Convert a kruby ApiError to the K8sRails exception tree (K3, §5.4).
@@ -107,10 +125,25 @@ module K8sRails
       end
 
       # Build a lazy in-memory ApiClient from the resolved configuration.
+      # Runs while BUILD_LOCK is held (from `build`) so the transport and the
+      # cached config are selected in one critical section.
       def build_api_client
-        config = build_configuration
+        config = resolved_connection_config
         bridge_bearer_token(config)
         Kubernetes::ApiClient.new(config)
+      end
+
+      # The resolved connection config, cached for the lifetime of the cached
+      # transport (#31): `connected?` and Resource operations MUST inspect /
+      # use the SAME connection — re-resolving the config would let the probe
+      # validate connection B while ops still send to connection A. MUST be
+      # read/written while holding BUILD_LOCK so a concurrent first build and
+      # first probe resolve the config EXACTLY ONCE (review: `||=` alone is
+      # not atomic). There is no implicit reload; `reset!` (test support,
+      # §5.1) is the explicit reload path. Cached only on success — a failed
+      # resolution (e.g. a broken kubeconfig) is re-attempted on the next call.
+      def resolved_connection_config
+        @resolved_connection_config ||= build_configuration
       end
 
       # Resolve the connection configuration. The kubeconfig load happens HERE
