@@ -1,8 +1,8 @@
 # k8s-rails 設計書
 
 - 文書番号: KBR-DESIGN-001
-- 版: 0.1.20（案）
-- 日付: 2026-10-14
+- 版: 0.1.21（案）
+- 日付: 2026-10-15
 - 対象リポジトリ: k8s-rails（本設計の実装先）
 - ライセンス: MIT（LICENSE は main に既存）
 
@@ -130,6 +130,9 @@ k8s-rails/
 # config/initializers/k8s-rails.rb
 K8sRails.configure do |config|
   config.namespace = ENV.fetch("K8S_NAMESPACE", "default")
+  # HTTP タイムアウト（秒・#33）。既定 30。解決済み接続の `timeout` が kruby の
+  # 未設定値 `0` のときのみ適用。`0` で無制限にオプトアウト
+  # config.http_timeout = 30
   # 任意上書き（省略時は default_config の自動検出。kruby 1.36.x の探索順序は
   # KUBECONFIG → ~/.kube/config → in-cluster で、in-cluster が最後）
   # config.connection = Kubernetes::Configuration.default_config
@@ -142,6 +145,7 @@ end
 | キー | 既定 | 説明 |
 |---|---|---|
 | `namespace` | `"default"` | CRD 宣言が namespace 未指定時のデフォルト |
+| `http_timeout` | `30` | HTTP タイムアウト（秒・#33）。接続解決時に、解決済み `Kubernetes::Configuration` の `timeout` が kruby の未設定値 `0` のときのみ適用（kruby 既定の `0` は libcurl 上**無制限待ち**で、Rails のリクエスト / ジョブを占有し得る）。`config.connection.timeout` に非 0 を明示した場合は**上書きしない**。`0` で kruby 既定の無制限にオプトアウト（kruby 側の `0` は「未設定」と区別できないため、オプトアウトは本キーで行う）。`nil` で組み込み既定値に戻す。非負 Integer / `nil` 以外は `ArgumentError`（`0.5` 等の Float は libcurl で `0`=無制限に丸められるため fail-fast）。`Resource` 操作と `connected?` の**双方**に同一適用（§5.2 の共通経路） |
 | `connection` | `nil`（自動検出） | `Kubernetes::Configuration` インスタンス。認証を上書きする場合に指定。省略時の探索順序（kruby 1.36.x の loader 実装順）: **KUBECONFIG → `~/.kube/config` → in-cluster**（in-cluster はファイル系が両方無効な場合の**最後**。kruby 上げ替え時に loader を再確認すること — §7） |
 | `api_client` | `nil` | **テスト専用**: kruby の `Kubernetes::ApiClient#call_api` と同型の 1 メソッド `call_api(http_method, path, opts)`（戻り値 `[data, status_code, headers]`。`http_method` は `:GET` / `:POST` / `:PATCH` / `:DELETE`、`path` は宣言の座標から構築された REST パス）を実装する素のオブジェクト。指定時は `Client.build` が接続解決をスキープして `StringKeyedAdapter` で包んで使う（§5.2・§9） |
 | `instrumentation` | `true` | `ActiveSupport::Notifications` で計測する（§8） |
@@ -153,7 +157,7 @@ end
   は通常どおり実行される。ただし異常終了前に書き込まれた属性は共有 Configuration
   に**残存する**（部分的な設定状態になり得るため、再実行ブロックは依存する属性を
   全て設定する責務を負う。アトミックなロールバックは行わない — Configuration
-  は純データで 4 属性のみのため、複写＋スワップの複雑さに見合わない）。
+  は純データで 5 属性のみのため、複写＋スワップの複雑さに見合わない）。
 - `K8sRails.reset!`（テスト用）で接続キャッシュ・宣言済 CRD を破棄できる。
 
 ### 5.2 接続
@@ -171,7 +175,7 @@ K8sRails.connected?      # → 成功時は true。失敗は K8sRails::Unavailab
 旧実装は `CustomObjectsApi` 経由で CRD / named-group のみ、core v1 は 404）:
 
 0. `config.api_client` があれば（テスト注入、§5.1）それを直接返し、以降の接続解決をスキップ
-1. `config.connection` があればそれ、なければ `Kubernetes::Configuration.default_config`。**解決済み config は cached transport の寿命とともに memoize**（#31）— `connected?` はこの memoized config をプローブし、Resource 操作と同じ接続を検査する。暗黙の再解決はない。明示的な再読み込みは `reset!`（§5.1）のみ。解決に失敗した場合（kubeconfig 不正等）は memoize せず次回呼び出しで再試行。**解決と transport 生成は同一クリティカルセクション（`Client::BUILD_LOCK`）で行う**（#31 レビュー指摘: `||=` は非アトミック — スレッド環境で並行する初回操作と初回プローブが双方 `build_configuration` を実行し、後書き勝ちで再び接続不一致を起こし得る。ロック内で config を 1 回だけ解決し、transport 生成・K1 ブリッジ・probe 用 config 取得のすべてが同じ解決結果を共有する。`reset!` も同一ロックを取り reset と build の交錯を防ぐ。プローブの HTTP I/O はロック外）
+1. `config.connection` があればそれ、なければ `Kubernetes::Configuration.default_config`。**解決済み config は cached transport の寿命とともに memoize**（#31）— `connected?` はこの memoized config をプローブし、Resource 操作と同じ接続を検査する。暗黙の再解決はない。明示的な再読み込みは `reset!`（§5.1）のみ。解決に失敗した場合（kubeconfig 不正等）は memoize せず次回呼び出しで再試行。**解決と transport 生成は同一クリティカルセクション（`Client::BUILD_LOCK`）で行う**（#31 レビュー指摘: `||=` は非アトミック — スレッド環境で並行する初回操作と初回プローブが双方 `build_configuration` を実行し、後書き勝ちで再び接続不一致を起こし得る。ロック内で config を 1 回だけ解決し、transport 生成・K1 ブリッジ・probe 用 config 取得のすべてが同じ解決結果を共有する。`reset!` も同一ロックを取り reset と build の交錯を防ぐ。プローブの HTTP I/O はロック外）。**HTTP タイムアウト適用（#33）**: 解決済み接続の `timeout` が kruby の未設定値 `0` のとき、`config.http_timeout`（既定 30 秒）を適用する（明示設定は上書きしない。`http_timeout = 0` で無制限にオプトアウト — kruby 側の `0` は「未設定」と区別できないためオプトアウトは gem 側キーで行う。適用は冪等）。kruby は `config.timeout` を**リクエストごとに**読むため、解決後に利用者が直接 `config.connection.timeout` を変更しても以降のリクエストに反映される
 2. **K1 橋渡し**: `api_key['authorization']` が `api_key['BearerToken']` に書かれていなければ複製し、その後の**全 `auth_settings` 呼び出し（= 全リクエスト）で再同期する**（kruby はリクエストごとに `auth_settings` を呼ぶ。in-cluster のトークン更新フックは `api_key_with_prefix("authorization")` 呼び出し時のみ発火するため、初回コピーに固定するとローテーション後のトークンがヘッダに到達せず長時間稼働プロセスで 401 が続く — #29 対応）。**スレッドセーフ**: リクエストが送出するトークンは当該呼び出しで新規取得した `authorization` 値を、その呼び出しの `auth_settings` 戻り値ハッシュに直接書き込むもので、共有 `api_key` への書き戻し後に再読みなし（並行リクエストの書き込みが挟んでも stale トークンを送出しない。共有キーは直接リーダ用の backing copy として更新を継続）。**app 側上書き**: ブリッジが最後に書いた値（`@k8s_rails_bridged_bearer_value` を追跡）と本次書き込み予定値のどちらも現 `BearerToken` と一致しない場合は、アプリが明示的に置き換えた（credential rotation）と判定し**同期を恒久的に停止** — app 側の値が権威となる（client 生成前の明示設定はブリッジ非設置、生成後の明示設定は同期停止で、いずれも上書きしない）
 3. `Kubernetes::ApiClient` を生成し、`StringKeyedAdapter` で包む。**パス構築**: 宣言の座標から REST パスを構築して `call_api` で実行 — core v1（`group == ""`）は `/api/{version}[/namespaces/{ns}]/{plural}[/{name}]`、named（CRD・named built-in）は `/apis/{group}/{version}[/namespaces/{ns}]/{plural}[/{name}]`。`return_type: "Object"` で kruby が JSON をパース（symbol キー）したオブジェクトを返し、**文字列キー化**（K2）を API レスポンス後に行う（`K8sRails::Normalizer`、ActiveSupport 非依存）
 4. **接続レベルの失敗**（DNS 失敗 / タイムアウト / 接続拒否等）は `K8sRails::Unavailable` に変換して `raise`（リトライはしない）。**kruby 1.36.x ではこれらの転送失敗は HTTP ステータスが無いため `Kubernetes::ApiError`（`code == 0`）として surfacing する**（§5.4 の変換表参照）。認可失敗（401/403）は §5.4 により `K8sRails::ApiError`
@@ -395,9 +399,16 @@ v0.1 の milestone 分割（開発セッション向けのタスク単位目安�
   形で、ポーリング置き換えのユースケース（consumer アプリの 30 秒ポーリング等）から設計する。
 - **複数クラスタ**: `K8sRails.cluster("prod") { ... }` のような名前付き client 集合。
   現時点で需要がないため v0.1 では単一クラスタ。
-- **retries / timeout**: kruby の `Kubernetes::Configuration` には接続タイムアウトが
-  設定できる。v0.1 は既定値 + README 記載のみで、gem 独自のバックオフは持たない
-  （Rails 側の middleware / sidekiq retry で吸収するのが慣習）。
+- **retries / timeout**: **timeout は実装済み（#33）** — kruby 1.36.x 既定の
+  `timeout = 0`（libcurl 上**無制限待ち**）に対し、gem は接続解決時に
+  `config.http_timeout`（既定 30 秒）を未設定のときのみ適用し、明示設定は
+  上書きしない（§5.1 / §5.2 / README）。
+  **リトライ**: gem 独自のバックオフは持たない（Rails 側の middleware /
+  sidekiq retry で吸収するのが慣習）。kruby の `retry_configuration`
+  （`max_retries > 0` で 429 / 5xx を指数バックオフで再試行）は利用者側の
+  表面で、README に**総待ち時間が `max_retries` に依存する**点を含めて説明
+  済み（タイムアウト自体は kruby 実装上リトライ対象外 — `retry_request?` は
+  `timed_out?` で即 false）。
 - **OpenTelemetry**: `instrumentation` を notification 経由にしているため、
   OTel instrumentation を別途足せる状態に留める（v0.1 で実装しない）。
 
@@ -487,3 +498,4 @@ PR の差分を最小化）。
 | 0.1.18 | 2026-10-14 | Issue #32 対応: `k8s-rails.request` 通知を **ActiveSupport ブロック形式に移行**（API 処理を `ActiveSupport::Notifications.instrument` のブロック内で実行）。①標準 start/finish が実処理を挟み `Event#duration` が実処理時間を反映（旧実装は実処理後に発行し標準 duration はほぼ 0 だった）②失敗時に標準 `exception` / `exception_object` メタデータが付与（`status` / `duration_ms` はブロック `ensure` で設定され finish イベントに常に含まれる。元例外はそのまま再送出）③既存 payload 契約（operation / 座標 / duration_ms / status 列挙）・no-op・戻り値契約は不変。AS 8.1.3.1 実測: 裸名購読者は finish イベント 1 件のみ受信（§8）。※版数 0.1.17 は PR #36（#28/#29）が使用 | 実装反映済み |
 | 0.1.19 | 2026-10-14 | Issue #30 対応: 接続設定の解決・クライアント生成段階（`Client.build` / `connected?` → `build_configuration`）での `Kubernetes::ConfigError` を `K8sRails::Unavailable` に**統一**（元例外を `cause` に保持 — rescue 内 raise の自動 cause。通信時の adapter / probe 変換と同一契約で、raw `ConfigError` は公開されない）。§5.4 変換規則表に ConfigError 行を追加・§5.4 例外ツリーの説明を同期・README 例外ツリーも同期。rescue は `ConfigError` のみの狭い形で、`NoMethodError` 等のプログラミングエラーは変換せず伝播。回帰テスト: 不正 context（kubeconfig の `current-context: missing`）で `Resource.list` / `connected?` の双方が `Unavailable` + `cause` = ConfigError | 実装反映済み |
 | 0.1.20 | 2026-10-14 | Issue #31 対応: `connected?` が **Resource 操作と同じキャッシュ済み接続を検査**するように改訂 — 解決済み config を cached transport の寿命とともに memoize（`@resolved_connection_config`）し、`Client.build` と `connected?` の双方が同一解決結果を使用。旧実装は `connected?` が毎回 `build_configuration` を再解決し、設定解決結果が変わった場合にプローブは新しい接続 (B) を検査する一方 Resource 操作は旧接続 (A) を使い続ける不整合があった。暗黙の再解決はせず、明示的な再読み込み経路は `reset!`（§5.1）。解決失敗時は memoize せず次回再試行。§5.2（build 手順・connected? 解決順序）と README Connectivity check を同期。回帰テスト: `default_config` が接続 A → B の順で返す環境で (1) probe が A に対して発行されること（B 実測 0 リクエスト・2 つのローカル HTTP サーバで実測）、(2) `reset!` 後に B へ切り替わること。④PR #39 レビュー対応（Codex P2 + Copilot 同一指摘）: memoize（`||=`）は非アトミックで、スレッド環境で初回 Resource 操作と初回 `connected?` が並行すると双方が `build_configuration` を実行し後書き勝ちで再び接続不一致を起こし得る → `Client::BUILD_LOCK`（Mutex）を導入し、初回の config 解決・K1 橋渡し・transport 生成を同一クリティカルセクションに閉じた（プローブの HTTP I/O はロック外）。`reset!` も同一ロックで build との交錯を防ぐ。決定論的並行回帰テスト: 解決スタブが入口を観測できるよう待ち合わせし、(a) 解決呼び出しが厳密に 1 回（ロック待ちの 2 スレッド目は入口に入れない）(b) op/probe がともに接続 A へ発行（B 実測 0 リクエスト）を検証 — 修正前 lib でこの spec は失敗（revert-proof） | 実装反映済み |
+| 0.1.21 | 2026-10-15 | Issue #33 対応: **既定の HTTP タイムアウト導入（挙動変更・#33）**。kruby 1.36.x の既定 `timeout = 0` は libcurl 上**無制限待ち**で、応答しない API が Rails のリクエスト / ジョブを占有し得る。`config.http_timeout`（既定 30 秒）を新設し、接続解決時に解決済み接続の `timeout` が未設定値 `0` のときのみ適用（明示設定は上書きしない。`http_timeout = 0` で無制限にオプトアウト — kruby 側 `0` は未設定と区別できないためオプトアウトは gem 側キーで行う。適用は冪等）。`Resource` 操作と `connected?` の双方に同一適用（§5.2 共通経路）。非負 Integer / `nil` 以外は `ArgumentError`（Float は libcurl で `0`=無制限に丸められるため fail-fast）。README に実行可能な設定例（kruby 読み込み含む）・kruby 既定 `0` = 無制限であること・kruby `retry_configuration` 使用時の総待ち時間が `max_retries` に依存する点（タイムアウト自体は kruby 実装上リトライ対象外）を追記。§11 の「retries / timeout」検討事項を実装済み方針に更新。実測: 3 秒遅延ループバックに対し `timeout = 1` で Resource 操作と `connected?` が双方 ~1.01 秒で `Unavailable`。※版数 0.1.20 はオープン PR #39（#31）が使用（並行 PR の事前割当規約） | 実装反映済み |

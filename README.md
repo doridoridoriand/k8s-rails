@@ -137,6 +137,7 @@ Workflow.delete("wf-1")                                            # readonly: f
 ```ruby
 K8sRails.configure do |config|
   config.namespace = "team-a"          # default namespace (default: "default")
+  # config.http_timeout = 30           # HTTP timeout in seconds (default: 30; 0 = unlimited)
   # config.connection = my_config      # pass a Kubernetes::Configuration directly (optional)
   # config.instrumentation = false     # disable instrumentation (default true; only effective when ActiveSupport is present)
   # config.api_client = stub           # test-only: inject a transport (see [Testing](#testing))
@@ -158,6 +159,63 @@ end
   (automatic detection in kruby 1.36.x: `KUBECONFIG` → `~/.kube/config` →
   in-cluster. Note in-cluster is tried **last**, after the file-based
   sources — re-verify `kruby`'s loader when upgrading kruby).
+
+### HTTP timeouts (default 30s)
+
+kruby's `Kubernetes::Configuration` defaults `timeout` to `0`, which in
+libcurl means **no timeout** — an unresponsive API server can hold a Rails
+request or background job indefinitely. To make that safe by default, the gem
+applies a finite timeout at connection resolution:
+
+```ruby
+K8sRails.configure do |config|
+  config.http_timeout = 30 # seconds (default: 30)
+end
+```
+
+- The value applies **only** when the resolved connection's `timeout` still
+  carries kruby's unset value (`0`). If you set one explicitly, the gem never
+  overrides it:
+
+  ```ruby
+  require "kubernetes"
+
+  my_config = Kubernetes::Configuration.default_config
+  my_config.timeout = 60 # explicit value — the gem never overrides it
+  K8sRails.configure do |config|
+    config.connection = my_config
+  end
+  ```
+- `config.http_timeout = 0` opts out entirely and restores kruby's unlimited
+  wait. (kruby's own `timeout = 0` is indistinguishable from "never set", so
+  the opt-out lives on this knob rather than on the kruby configuration.)
+- The same policy covers Resource operations **and** `K8sRails.connected?` —
+  both resolve the connection through the same path.
+- A finite timeout turns a hung connection into `K8sRails::Unavailable`
+  (kruby surfaces it as `ApiError` code 0 with a "Connection timed out"
+  message; the gem converts it — see [Exception hierarchy](#exception-hierarchy)).
+- Set `http_timeout` before the first `K8sRails.client` / API call: it is
+  applied once, when the connection is resolved. Changing
+  `config.connection.timeout` directly works at any time (kruby re-reads it
+  for every request).
+- `http_timeout` accepts a non-negative **Integer** or `nil` (built-in
+  default). Other values raise `ArgumentError` — a `Float` like `0.5` would
+  be truncated by libcurl to `0` (= unlimited), silently recreating the
+  unbounded wait this default exists to prevent.
+
+### Retries
+
+The gem does not add its own retry/backoff layer. kruby 1.36.x offers retries
+on the resolved connection's `retry_configuration` hash
+(`{ max_retries: N, base_interval_seconds: F, retry_statuses: [...] }`;
+disabled by default — `max_retries` 0, and even when enabled only the status
+codes 429/500/501/502/503 are retried, with the server's `Retry-After` taken
+into account when present). When enabled, **the total wait scales with
+`max_retries`**: every retryable response re-runs the full request plus the
+exponential backoff between attempts, so one call can take roughly
+`(1 + max_retries) × timeout` plus the intervals. Timed-out requests are
+**not** retried. For broader failure handling, rely on Rails middleware /
+background-job retries.
 
 ## Resource declaration and access
 

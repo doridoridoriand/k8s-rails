@@ -9,6 +9,12 @@ module K8sRails
   #
   # This class is pure data: it never touches the network or kruby.
   class Configuration
+    # 既定の HTTP タイムアウト（秒）。kruby 1.36.x の既定 `timeout = 0` は
+    # **無制限待ち**を意味し、応答しない接続が Rails のリクエストやジョブを
+    # 占有し得るため（#33）、接続解決時に未設定ならこの値を適用する。
+    # `http_timeout = 0` で kruby 既定の無制限に戻せる（オプトアウト）。
+    DEFAULT_HTTP_TIMEOUT = 30
+
     # CRD 宣言が namespace 未指定時のデフォルト。
     attr_accessor :namespace
 
@@ -17,6 +23,12 @@ module K8sRails
     # kruby 更新時にこの順序が変更されていないか loader を再確認すること）。
     # 認証を上書きする場合に指定する。
     attr_accessor :connection
+
+    # HTTP タイムアウト（秒、§5.1・#33）。接続解決時に、解決済み
+    # Kubernetes::Configuration の `timeout` が kruby の未設定値 `0` で
+    # あるときのみ適用する。利用者が `config.connection.timeout` に非 0 を
+    # 明示した場合は勝手に上書きしない。`0` で無制限にオプトアウト。
+    attr_accessor :http_timeout
 
     # テスト専用（§5.1）。kruby の `Kubernetes::ApiClient#call_api` と同型の
     # `call_api(http_method, path, opts)` メソッドを実装した素のオブジェクトを
@@ -32,6 +44,7 @@ module K8sRails
     def initialize
       @namespace = "default"
       @connection = nil
+      @http_timeout = DEFAULT_HTTP_TIMEOUT
       @api_client = nil
       @instrumentation = true
     end
