@@ -327,6 +327,16 @@ RSpec.describe K8sRails::Client do
       expect(kconfig.timeout).to eq(7)
     end
 
+    it "preserves an explicitly set fractional connection.timeout (no to_i coercion)" do
+      kconfig = Kubernetes::Configuration.new
+      kconfig.timeout = 0.5
+      K8sRails.config.connection = kconfig
+
+      K8sRails.client
+
+      expect(kconfig.timeout).to eq(0.5)
+    end
+
     it "applies a custom http_timeout when the connection timeout is unset" do
       kconfig = Kubernetes::Configuration.new
       K8sRails.config.connection = kconfig
@@ -367,7 +377,16 @@ RSpec.describe K8sRails::Client do
       kconfig = Kubernetes::Configuration.new
       K8sRails.config.connection = kconfig
       K8sRails.client
+      expect(kconfig.timeout).to eq(30)
+
+      # reset! rebuilds the shared configuration, so re-attach the SAME
+      # connection — otherwise the second build would resolve the ambient
+      # default_config and the assertion below would test an abandoned
+      # object. With a DIFFERENT knob value on the second resolution, the
+      # already-applied 30 must read as explicit and stay untouched.
       K8sRails.reset!
+      K8sRails.config.connection = kconfig
+      K8sRails.config.http_timeout = 5
       K8sRails.client
 
       expect(kconfig.timeout).to eq(30)

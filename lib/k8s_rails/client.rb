@@ -179,12 +179,28 @@ module K8sRails
       #
       # Idempotent: after the first application the resolved timeout is
       # non-zero, so later resolutions skip (the value reads as explicit).
+      #
+      # The "unset" test is kruby's own 0, compared in its ORIGINAL type —
+      # never via to_i coercion, which would read an explicit fractional
+      # value (0.5) as unset and overwrite it. A non-Numeric (or nil)
+      # connection timeout is likewise treated as explicitly set and
+      # preserved; the Integer restriction is the http_timeout knob's own
+      # contract (validate_http_timeout!), not the connection's.
       def apply_http_timeout(config)
         requested = K8sRails.config.http_timeout
         validate_http_timeout!(requested)
-        return if requested&.zero? || !config.timeout.to_i.zero?
+        return if requested&.zero? || !connection_timeout_unset?(config)
 
         config.timeout = requested || Configuration::DEFAULT_HTTP_TIMEOUT
+      end
+
+      # True only when the resolved connection's timeout still carries
+      # kruby's unset value — numeric 0, its initialize default. A nil or
+      # non-Numeric timeout is never kruby's produced value, so it reads as
+      # explicitly set by the app and is preserved untouched.
+      def connection_timeout_unset?(config)
+        value = config.timeout
+        value.is_a?(Numeric) && value.zero?
       end
 
       # `http_timeout` accepts nil (built-in default) or a non-negative
