@@ -242,7 +242,10 @@ The probe inspects the **same cached connection** the Resource operations
 use — the resolved configuration is memoized for the lifetime of the cached
 transport, so a config resolution that changes after the first call is not
 re-resolved for the probe (it would otherwise validate connection B while
-operations still use connection A). `K8sRails.reset!` is the explicit reload
+operations still use connection A). The first resolution, the K1 bridge, and
+the transport build run inside one internal lock, so a concurrent Resource
+operation and `connected?` call resolve the configuration exactly once (the
+probe's HTTP I/O stays outside the lock). `K8sRails.reset!` is the explicit reload
 path: after it, both the probe and the next API call resolve the
 configuration anew.
 

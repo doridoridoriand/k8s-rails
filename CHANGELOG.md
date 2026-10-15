@@ -21,7 +21,13 @@ All notable changes to `k8s-rails` are documented in this file.
   no implicit re-resolution; `K8sRails.reset!` remains the explicit reload
   path (after it, both the probe and the next API call resolve the
   configuration anew). A failed resolution (e.g. a broken kubeconfig) is not
-  memoized and is re-attempted on the next call.
+  memoized and is re-attempted on the next call. The first resolution, the
+  K1 bridge, and the transport build run inside one internal lock
+  (`Client::BUILD_LOCK`), so a concurrent first Resource operation and first
+  `connected?` call resolve the configuration exactly once in a threaded
+  Rails process (the probe's HTTP I/O stays outside the lock) — a
+  deterministic regression test asserts a single resolution under a racing
+  build/probe and fails on the pre-lock code.
 
 - **`find` / `patch` / `delete` (and `*_cluster`) reject invalid target names
   before any request is issued** (#28): `nil`, an empty string, `"."` or
