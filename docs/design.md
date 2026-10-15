@@ -1,7 +1,7 @@
 # k8s-rails 設計書
 
 - 文書番号: KBR-DESIGN-001
-- 版: 0.1.18（案）
+- 版: 0.1.19（案）
 - 日付: 2026-10-14
 - 対象リポジトリ: k8s-rails（本設計の実装先）
 - ライセンス: MIT（LICENSE は main に既存）
@@ -265,7 +265,7 @@ ClusterIssuer = K8sRails.crd(
 
 ```ruby
 K8sRails::Error < StandardError
-├── K8sRails::Unavailable   # 接続不能・タイムアウト・DNS 失敗等（クラスタ起因）
+├── K8sRails::Unavailable   # 接続不能・タイムアウト・DNS 失敗・kubeconfig 読み込み失敗等（クラスタ / 接続設定起因）
 ├── K8sRails::NotFound      # リソース不在（HTTP 404）
 ├── K8sRails::ApiError      # その他の API エラー（401/403/409/422 等）。#code と #response を保持
 ├── K8sRails::ReadOnlyError      # readonly: true 宣言で create/patch/delete が呼ばれた（設定ミス）
@@ -277,6 +277,7 @@ K8sRails::Error < StandardError
 | kruby 側 | → gem 側 |
 |---|---|
 | kruby 転送層例外（DNS 失敗 / タイムアウト / 接続拒否等。kruby 1.36.x では **`ApiError`（`code == 0`）** として surfacing） | `Unavailable` |
+| `Kubernetes::ConfigError`（kubeconfig 読み込み / context 解決の失敗。**設定読み込み時** = `Client.build` / `connected?` の設定解決段階、**通信時** = adapter / probe の双方で発生し得る） | `Unavailable`（元例外を `cause` に保持 — 設定解決段階では raw `ConfigError` を公開しない） |
 | その他の `StandardError`（プログラミング/設定ミス、例: `NoMethodError`） | そのまま伝播（変換せず隠さない） |
 | `Kubernetes::ApiError` code 404 | `NotFound` |
 | `Kubernetes::ApiError` その他 | `ApiError`（code / response body を保持） |
@@ -484,3 +485,4 @@ PR の差分を最小化）。
 | 0.1.16 | 2026-09-22 | v0.3.1 リリース準備: gemspec の `summary` / `description` 文言更新（PR #25）を**公開 gem として反映するための docs みのパッチリリース**。公開済み gem の文言は公開後に変更できない（RubyGems に gem メタの編集 API / UI なし）ため、0.3.1 の公開で RubyGems ページ表示が新文言に切り替わる。①`VERSION` を 0.3.0 → **0.3.1**（version.rb + version spec）②CHANGELOG に 0.3.1 セクション追加③README の `VERSION` 例・§3 ツリーコメントを同期。**コード・挙動の変更なし** | 実装反映済み |
 | 0.1.17 | 2026-10-13 | Issue #28–#29 対応（両方 priority:high・v0.4 予定）: ①#28 `find` / `patch` / `delete`（cluster 版を含む）が無効な対象名（`nil` / 空文字列 / `.` / `..`）を**通信前に** `ArgumentError` で拒否（従来 `delete(nil)` は Delete Collection URL を生成し一括削除リスク、`.` / `..` は HTTP クライアントのパス正規化で送信先が変化。ゲート順は scope → readonly → 名検証・計測より前）。§5.3 / README に明記②#29 K1 ブリッジを「初回コピー」から「全 `auth_settings` 呼び出し（全リクエスト）で再同期」に改訂: kruby 1.36.x の in-cluster 更新フックは `api_key_with_prefix("authorization")` 呼び出し時のみ発火するため、初回コピー固定では ServiceAccount トークンローテーションが反映されず長時間稼働プロセスで 401 が続く問題を実修正。解決済み config の singleton class に sync モジュールを prepend。ユーザー明示設定の `BearerToken` はブリッジ・上書きしない（区別マーカー付き）。§5.2 / §7（上げ替えチェックリスト）/ README を同期③PR #36 レビュー対応: (a) 送出トークンを「共有 `api_key` 書き戻し後 `super` が再読みなし」に変更 — `super` が先に per-call settings を構築し、当該呼び出しで新規取得した `authorization` 値をその戻り値ハッシュに直接書き込む（スレッド環境で並行リクエストの stale 書き込みが挟んでも stale トークンを送出しない）(b) ブリッジが最後に書いた値を追跡（`@k8s_rails_bridged_bearer_value`）し、app が client 生成後に `BearerToken` を置き換えた場合は同期を恒久的に停止して app 側の値を権威とする（「上書きしない」保証を生成後の上書きまで拡張）| 実装反映済み |
 | 0.1.18 | 2026-10-14 | Issue #32 対応: `k8s-rails.request` 通知を **ActiveSupport ブロック形式に移行**（API 処理を `ActiveSupport::Notifications.instrument` のブロック内で実行）。①標準 start/finish が実処理を挟み `Event#duration` が実処理時間を反映（旧実装は実処理後に発行し標準 duration はほぼ 0 だった）②失敗時に標準 `exception` / `exception_object` メタデータが付与（`status` / `duration_ms` はブロック `ensure` で設定され finish イベントに常に含まれる。元例外はそのまま再送出）③既存 payload 契約（operation / 座標 / duration_ms / status 列挙）・no-op・戻り値契約は不変。AS 8.1.3.1 実測: 裸名購読者は finish イベント 1 件のみ受信（§8）。※版数 0.1.17 は PR #36（#28/#29）が使用 | 実装反映済み |
+| 0.1.19 | 2026-10-14 | Issue #30 対応: 接続設定の解決・クライアント生成段階（`Client.build` / `connected?` → `build_configuration`）での `Kubernetes::ConfigError` を `K8sRails::Unavailable` に**統一**（元例外を `cause` に保持 — rescue 内 raise の自動 cause。通信時の adapter / probe 変換と同一契約で、raw `ConfigError` は公開されない）。§5.4 変換規則表に ConfigError 行を追加・§5.4 例外ツリーの説明を同期・README 例外ツリーも同期。rescue は `ConfigError` のみの狭い形で、`NoMethodError` 等のプログラミングエラーは変換せず伝播。回帰テスト: 不正 context（kubeconfig の `current-context: missing`）で `Resource.list` / `connected?` の双方が `Unavailable` + `cause` = ConfigError | 実装反映済み |

@@ -4,6 +4,16 @@ All notable changes to `k8s-rails` are documented in this file.
 
 ## Unreleased
 
+- **kubeconfig load failures now surface as `K8sRails::Unavailable`** (#30):
+  `Kubernetes::Configuration.default_config` runs before any request, so a
+  broken kubeconfig (e.g. a `current-context` that does not exist) leaked the
+  raw `Kubernetes::ConfigError` out of `K8sRails.client` / `K8sRails.connected?`.
+  The config-resolution stage (`Client.build_configuration`) now applies the
+  same conversion as the transport-time path — `Unavailable` with the original
+  `Kubernetes::ConfigError` preserved as `#cause` — for both `Resource.list`
+  and `connected?`. The rescue is narrow (`ConfigError` only), so programming
+  errors still propagate unconverted.
+
 - **`find` / `patch` / `delete` (and `*_cluster`) reject invalid target names
   before any request is issued** (#28): `nil`, an empty string, `"."` or
   `".."` raise `ArgumentError`. Previously `delete(nil)` built the
