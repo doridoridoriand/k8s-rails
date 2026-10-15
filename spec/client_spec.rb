@@ -206,6 +206,54 @@ RSpec.describe K8sRails::Client do
     end
   end
 
+  # #31: connected? must inspect the SAME connection the Resource operations
+  # use. The resolved config is memoized for the cached transport's lifetime —
+  # re-resolving would let the probe validate connection B while ops still
+  # send to connection A. reset! is the explicit reload path.
+  describe "connected? shares the cached connection with Resource ops (#31)" do
+    def local_config(server)
+      Kubernetes::Configuration.new.tap do |c|
+        c.host = "http://127.0.0.1:#{server.port}"
+      end
+    end
+
+    it "probes the cached config when the config resolution changes" do
+      server_a = LocalHttpServer.new(requests: 2).start
+      server_b = LocalHttpServer.new(requests: 2).start
+      config_a = local_config(server_a)
+      config_b = local_config(server_b)
+      allow(Kubernetes::Configuration).to receive(:default_config).and_return(config_a, config_b)
+      begin
+        K8sRails.client.list("g", "v", "n", "p")
+        K8sRails.connected?
+        expect(server_a.authorization_headers.size).to eq(2)
+        expect(server_b.authorization_headers.size).to eq(0)
+      ensure
+        server_a.stop
+        server_b.stop
+      end
+    end
+
+    it "applies the new config after reset! (explicit reload path)" do
+      server_a = LocalHttpServer.new(requests: 2).start
+      server_b = LocalHttpServer.new(requests: 2).start
+      config_a = local_config(server_a)
+      config_b = local_config(server_b)
+      allow(Kubernetes::Configuration).to receive(:default_config).and_return(config_a, config_b)
+      begin
+        K8sRails.client.list("g", "v", "n", "p")
+        K8sRails.reset!
+        K8sRails.client.list("g", "v", "n", "p")
+        K8sRails.connected?
+        expect(server_a.authorization_headers.size).to eq(1)
+        expect(server_b.authorization_headers.size).to eq(2)
+      ensure
+        server_a.stop
+        server_b.stop
+      end
+    end
+  end
+
   # --- Path building (core v1 vs named group, namespaced vs cluster) --------
 
   describe "API path building" do

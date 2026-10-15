@@ -13,6 +13,15 @@ All notable changes to `k8s-rails` are documented in this file.
   `Kubernetes::ConfigError` preserved as `#cause` — for both `Resource.list`
   and `connected?`. The rescue is narrow (`ConfigError` only), so programming
   errors still propagate unconverted.
+- **`connected?` now probes the same cached connection as Resource
+  operations** (#31): the resolved configuration is memoized alongside the
+  cached transport (`@resolved_connection_config`), so a config resolution that re-resolves
+  to a different connection after the first call no longer lets the probe
+  validate connection B while operations still send to connection A. There is
+  no implicit re-resolution; `K8sRails.reset!` remains the explicit reload
+  path (after it, both the probe and the next API call resolve the
+  configuration anew). A failed resolution (e.g. a broken kubeconfig) is not
+  memoized and is re-attempted on the next call.
 
 - **`find` / `patch` / `delete` (and `*_cluster`) reject invalid target names
   before any request is issued** (#28): `nil`, an empty string, `"."` or

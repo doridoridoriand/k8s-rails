@@ -238,6 +238,14 @@ It never returns `false` — a connection failure surfaces as an exception
 (handle it with `rescue`). The actual API connection is established lazily on
 the first API call.
 
+The probe inspects the **same cached connection** the Resource operations
+use — the resolved configuration is memoized for the lifetime of the cached
+transport, so a config resolution that changes after the first call is not
+re-resolved for the probe (it would otherwise validate connection B while
+operations still use connection A). `K8sRails.reset!` is the explicit reload
+path: after it, both the probe and the next API call resolve the
+configuration anew.
+
 When a test transport is injected via `config.api_client`, `connected?`
 returns `true` without any network I/O — the injected transport **is** the
 connection surface, so probing a real endpoint would contradict the Resource
