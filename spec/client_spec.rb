@@ -305,6 +305,138 @@ RSpec.describe K8sRails::Client do
     end
   end
 
+  # --- HTTP timeout policy (#33) --------------------------------------------
+
+  describe "http_timeout (finite default, explicit values win, #33)" do
+    it "applies the 30s default when the resolved timeout is kruby's unset 0" do
+      kconfig = Kubernetes::Configuration.new
+      K8sRails.config.connection = kconfig
+
+      K8sRails.client
+
+      expect(kconfig.timeout).to eq(30)
+    end
+
+    it "never overrides an explicitly set connection.timeout" do
+      kconfig = Kubernetes::Configuration.new
+      kconfig.timeout = 7
+      K8sRails.config.connection = kconfig
+
+      K8sRails.client
+
+      expect(kconfig.timeout).to eq(7)
+    end
+
+    it "preserves an explicitly set fractional connection.timeout (no to_i coercion)" do
+      kconfig = Kubernetes::Configuration.new
+      kconfig.timeout = 0.5
+      K8sRails.config.connection = kconfig
+
+      K8sRails.client
+
+      expect(kconfig.timeout).to eq(0.5)
+    end
+
+    it "applies a custom http_timeout when the connection timeout is unset" do
+      kconfig = Kubernetes::Configuration.new
+      K8sRails.config.connection = kconfig
+      K8sRails.config.http_timeout = 5
+
+      K8sRails.client
+
+      expect(kconfig.timeout).to eq(5)
+    end
+
+    it "http_timeout = 0 opts out and leaves kruby's unlimited default (0)" do
+      kconfig = Kubernetes::Configuration.new
+      K8sRails.config.connection = kconfig
+      K8sRails.config.http_timeout = 0
+
+      K8sRails.client
+
+      expect(kconfig.timeout).to eq(0)
+    end
+
+    it "rejects a non-Integer http_timeout (Float silently truncates to 0 = unlimited)" do
+      kconfig = Kubernetes::Configuration.new
+      K8sRails.config.connection = kconfig
+      K8sRails.config.http_timeout = 0.5
+
+      expect { K8sRails.client }.to raise_error(ArgumentError, /http_timeout/)
+    end
+
+    it "rejects a negative http_timeout with ArgumentError" do
+      kconfig = Kubernetes::Configuration.new
+      K8sRails.config.connection = kconfig
+      K8sRails.config.http_timeout = -1
+
+      expect { K8sRails.client }.to raise_error(ArgumentError, /http_timeout/)
+    end
+
+    it "is idempotent: a re-resolution sees the applied value as explicit and skips" do
+      kconfig = Kubernetes::Configuration.new
+      K8sRails.config.connection = kconfig
+      K8sRails.client
+      expect(kconfig.timeout).to eq(30)
+
+      # reset! rebuilds the shared configuration, so re-attach the SAME
+      # connection — otherwise the second build would resolve the ambient
+      # default_config and the assertion below would test an abandoned
+      # object. With a DIFFERENT knob value on the second resolution, the
+      # already-applied 30 must read as explicit and stay untouched.
+      K8sRails.reset!
+      K8sRails.config.connection = kconfig
+      K8sRails.config.http_timeout = 5
+      K8sRails.client
+
+      expect(kconfig.timeout).to eq(30)
+    end
+
+    # The `connected?` probe resolves the SAME configuration — the policy
+    # must hold there too (#33: Resource operations and the connectivity
+    # check agree). A loopback server answers the real /version probe.
+    it "applies the policy on the connected? probe path (loopback)" do
+      server = LocalHttpServer.new(requests: 1).start
+      kconfig = Kubernetes::Configuration.new
+      kconfig.scheme = "http"
+      kconfig.host = "127.0.0.1:#{server.port}"
+      kconfig.api_key["BearerToken"] = "timeout-probe"
+      K8sRails.config.connection = kconfig
+
+      expect(K8sRails.connected?).to be(true)
+      expect(kconfig.timeout).to eq(30)
+    ensure
+      server.stop
+    end
+
+    # End-to-end on the REAL transport path (kruby ApiClient + Typhoeus): a
+    # finite timeout turns a slow response into K8sRails::Unavailable on
+    # BOTH Resource operations and the connectivity probe (#33 完了条件).
+    # The explicit connection.timeout = 1 also proves the policy leaves it
+    # untouched while the conversion still happens.
+    it "converts a slow response into Unavailable on the op and probe paths" do
+      slow = SlowResponseServer.new(delay: 3).start
+      kconfig = Kubernetes::Configuration.new
+      kconfig.scheme = "http"
+      kconfig.host = "127.0.0.1:#{slow.port}"
+      kconfig.api_key["BearerToken"] = "timeout-probe"
+      kconfig.timeout = 1 # finite, well below the server delay
+      K8sRails.config.connection = kconfig
+      pod = K8sRails.crd(group: "", version: "v1", plural: "pods", kind: "Pod")
+
+      started = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+      expect { pod.find("p-1") }.to raise_error(K8sRails::Unavailable)
+      # Lower bound only (CI is slow): proves the 1s client-side timeout was
+      # actually enforced, not an instant failure — the 3s server delay
+      # means an unbounded-wait regression would raise nothing instead.
+      expect(Process.clock_gettime(Process::CLOCK_MONOTONIC) - started).to be >= 0.9
+
+      expect { K8sRails.connected? }.to raise_error(K8sRails::Unavailable)
+    ensure
+      slow&.stop
+    end
+  end
+
   # --- Path building (core v1 vs named group, namespaced vs cluster) --------
 
   describe "API path building" do

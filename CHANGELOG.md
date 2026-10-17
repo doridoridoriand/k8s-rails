@@ -64,6 +64,24 @@ All notable changes to `k8s-rails` are documented in this file.
   `duration_ms` are set in the block's `ensure`, so the finish event payload
   always carries them and the original exception is still re-raised.
 
+- **A finite HTTP timeout (30s) is now applied by default** (#33,
+  behavior change): kruby's `Kubernetes::Configuration` defaults `timeout`
+  to `0`, which in libcurl means NO timeout — an unresponsive API server
+  could hold a Rails request or background job indefinitely. The gem now
+  applies a new `config.http_timeout` (default 30 seconds) at connection
+  resolution, ONLY when the resolved connection's `timeout` still carries
+  kruby's unset value (`0`): an explicitly set `config.connection.timeout`
+  is never overridden. Set `config.http_timeout = 0` to opt out and restore
+  the previous unlimited wait. The same policy covers Resource operations
+  and `K8sRails.connected?`. `http_timeout` accepts a non-negative Integer
+  or nil; other values raise `ArgumentError` (a `Float` like `0.5` would be
+  truncated by libcurl to `0` = unlimited). A finite timeout surfaces a hung
+  connection as `K8sRails::Unavailable` (kruby reports it as `ApiError`
+  code 0, "Connection timed out"). The gem still adds no retry layer of its
+  own; kruby's optional `retry_configuration` re-runs the full request per
+  retryable status, so the total wait scales with `max_retries` (timed-out
+  requests are never retried) — documented in the README.
+
 ## 0.3.1
 
 - **Gemspec wording sync (RubyGems page text update)**: `summary` / `description`

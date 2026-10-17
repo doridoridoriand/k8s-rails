@@ -154,10 +154,65 @@ module K8sRails
       # transport-time conversion in StringKeyedAdapter#request /
       # VersionApiProbe#probe. The rescue is deliberately narrow: programming
       # errors must not be swallowed (design §5.4).
+      #
+      # The resolved configuration is where the HTTP timeout policy is
+      # applied (apply_http_timeout), so Resource operations (build_api_client)
+      # and the `connected?` probe carry the SAME value (#33).
       def build_configuration
-        K8sRails.config.connection || Kubernetes::Configuration.default_config
+        config = K8sRails.config.connection || Kubernetes::Configuration.default_config
+        apply_http_timeout(config)
+        config
       rescue Kubernetes::ConfigError => e
         raise Unavailable, "K8s に接続できません: #{e.message}"
+      end
+
+      # HTTP timeout policy (design §5.1 / #33). kruby 1.36.x defaults
+      # `Configuration#timeout` to 0, which means NO timeout — an
+      # unresponsive API would hold a Rails request / job forever. Apply the
+      # configured `http_timeout` (K8sRails::Configuration, default 30s) ONLY
+      # when the resolved configuration still carries kruby's unset value
+      # (0): an explicitly set `config.connection.timeout` (any non-zero
+      # value) is never overridden. `http_timeout = 0` opts out entirely and
+      # restores kruby's unlimited default — kruby's own `timeout = 0` is
+      # indistinguishable from "never set", so it is treated as unset and the
+      # opt-out lives on the K8sRails knob instead.
+      #
+      # Idempotent: after the first application the resolved timeout is
+      # non-zero, so later resolutions skip (the value reads as explicit).
+      #
+      # The "unset" test is kruby's own 0, compared in its ORIGINAL type —
+      # never via to_i coercion, which would read an explicit fractional
+      # value (0.5) as unset and overwrite it. A non-Numeric (or nil)
+      # connection timeout is likewise treated as explicitly set and
+      # preserved; the Integer restriction is the http_timeout knob's own
+      # contract (validate_http_timeout!), not the connection's.
+      def apply_http_timeout(config)
+        requested = K8sRails.config.http_timeout
+        validate_http_timeout!(requested)
+        return if requested&.zero? || !connection_timeout_unset?(config)
+
+        config.timeout = requested || Configuration::DEFAULT_HTTP_TIMEOUT
+      end
+
+      # True only when the resolved connection's timeout still carries
+      # kruby's unset value — numeric 0, its initialize default. A nil or
+      # non-Numeric timeout is never kruby's produced value, so it reads as
+      # explicitly set by the app and is preserved untouched.
+      def connection_timeout_unset?(config)
+        value = config.timeout
+        value.is_a?(Numeric) && value.zero?
+      end
+
+      # `http_timeout` accepts nil (built-in default) or a non-negative
+      # Integer (0 = opt out, N >= 1 = seconds). Rejecting non-Integers is
+      # fail-fast on purpose: a Float like 0.5 would be truncated by
+      # typhoeus/libcurl to CURLOPT_TIMEOUT 0 = unlimited — silently
+      # recreating the unbounded wait this policy exists to prevent.
+      def validate_http_timeout!(value)
+        return if value.nil? || (value.is_a?(Integer) && value >= 0)
+
+        raise ArgumentError,
+              "http_timeout must be a non-negative Integer or nil (got #{value.inspect})"
       end
 
       # K1 bridge (kruby 1.36.x quirk): InClusterConfig writes the Bearer token
