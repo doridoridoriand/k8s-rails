@@ -16,7 +16,7 @@ For the design rationale, see the [design document (docs/design.md)](docs/design
 
 | Item | Supported range | Notes |
 |------|-----------------|-------|
-| Ruby | `>= 3.3, < 4.1` | Floor: kruby 1.36.x requires Ruby 3.3. Ruby 4.0 support verified on Ruby 4.0.7 (2026-09-22); Ruby 3.5 verified on 3.5.0-preview1 (the only released 3.5, 2026-09-22). CI verifies the declared range with a 3.3.0 / 3.3.8 / 3.4.10 / 3.5.0-preview1 / 4.0.7 matrix — every released Ruby in the range |
+| Ruby | `>= 3.3, < 4.1` | Floor: kruby 1.36.x requires Ruby 3.3. Ruby 4.0 support verified on Ruby 4.0.7 (2026-09-22, re-verified with kruby 1.36.5.2 on 2026-10-18); Ruby 3.5 verified on 3.5.0-preview1 (the only released 3.5, re-verified 2026-10-18). CI verifies the declared range with a 3.3.0 / 3.3.8 / 3.4.10 / 3.5.0-preview1 / 4.0.7 matrix. Ruby 4.1.0-preview1 (published 2026-10-17) is technically inside the range (`4.1.0.preview1 < 4.1`) but has no runnable CI shard yet: `bundle install` fails under it with the upstream RubyGems/Bundler bug `uninitialized constant Pathname::SEPARATOR_PAT` (Bundler 4.0.23; verified 2026-10-17) — the shard lands once rubygems fixes it or 4.1 goes stable |
 | kruby | `~> 1.36.0` | The official Kubernetes OpenAPI client |
 | Kubernetes server | **Verified on v1.33.x** (real cluster, microk8s v1.33.13, 2026-09-21) | The transport speaks the generic Kubernetes REST API, so newer servers (1.36, etc.) are expected to work but are not yet verified on a real cluster |
 | Dependencies | **kruby only** at runtime | ActiveSupport is used only for optional [instrumentation](#instrumentation-optional-activesupport) (no-op when absent) |

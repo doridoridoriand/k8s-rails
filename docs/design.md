@@ -1,8 +1,8 @@
 # k8s-rails 設計書
 
 - 文書番号: KBR-DESIGN-001
-- 版: 0.1.21（案）
-- 日付: 2026-10-15
+- 版: 0.1.22（案）
+- 日付: 2026-10-18
 - 対象リポジトリ: k8s-rails（本設計の実装先）
 - ライセンス: MIT（LICENSE は main に既存）
 
@@ -303,7 +303,7 @@ end
 
 | 依存 | 制約 | 理由 |
 |---|---|---|
-| Ruby | `>= 3.3, < 4.1` | 下限: kruby 1.36.x が `required_ruby_version ">= 3.3"` を宣言（RubyGems API で実測 2026-09-21、1.36.0.1〜1.36.4.1 全バージョン）。上限: 「宣言した minor を必ず CI で検証する」方針 — 2026-09-22 に Ruby 4.0.7（stable）と Ruby 3.5.0-preview1（3.5 系で公開済みの唯一のリリース）で全 suite / rubocop を実行し緑を確認（matrix に 4.0.7 / 3.5.0-preview1 追加・v0.2.1）。この範囲で公開済みの Ruby は 3.3.x / 3.4.x / 3.5.0-preview1 / 4.0.x のみ（ruby/ruby タグ実測・4.1 系リリースなし）のため宣言範囲 = 検証範囲。RubyGems は version requirement で集合和を表現できないため未検証 minor を区間で挟み込む形（`< 5.0` 等）は取らない。3.5 stable / 4.1 系がリリースされたら matrix を追加して検証（§10 / §13） |
+| Ruby | `>= 3.3, < 4.1` | 下限: kruby 1.36.x が `required_ruby_version ">= 3.3"` を宣言（RubyGems API で実測 2026-10-18、1.36.0.1〜1.36.5.2 全バージョン）。上限: 「宣言した minor を必ず CI で検証する」方針 — 2026-09-22 に Ruby 4.0.7（stable）と Ruby 3.5.0-preview1（3.5 系で公開済みの唯一のリリース）で全 suite / rubocop を実行し緑を確認（matrix に 4.0.7 / 3.5.0-preview1 追加・v0.2.1）。kruby 1.36.5.2（2026-10-17 公開）でも 3.3.8 / 3.5.0-preview1 / 4.0.7 を再実測（#41）。**Ruby 4.1.0-preview1 は 2026-10-17 に公開済み**（ruby/ruby タグ実測）で `4.1.0.preview1 < 4.1` のため技術的には本区間内だが、matrix に追加できない（preview1 環境で `bundle install` が RubyGems/Bundler 既知の `uninitialized constant Pathname::SEPARATOR_PAT`（Bundler 4.0.23 でも再現）で失敗・ローカル実測 2026-10-17。rubygems の修正後または 4.1 stable リリース時に matrix 追加）。RubyGems は version requirement で集合和を表現できないため preview1 のみを区間から除外する書き方は存在しない。3.5 stable / 4.1 stable がリリースされたら matrix を追加して検証（§10 / §13） |
 | `kruby` | `~> 1.36.0` | consumer アプリと同一 pin。`~> 1.36.0` は 1.36.x のみ許可（`~> 1.36` 形式は 1.37 以降も許容してしまうため使用しない）。新しめの kruby に対応する場合は §7 の確認事項（client.rb の `call_api` 依存箇所・K1 橋渡し・`default_config` 探索順序）を済ませてから明示的に上げ替える |
 | `activesupport` | **任意**（`>= 7.0`） | `defined?(ActiveSupport::Notifications)` でガード（計測のみ、§8）。Rails 無し環境（Cron スクリプト等）でも動作する必要がある — レスポンスの文字列キー化（K2）はこれに依存せず、gem 内部の純 Ruby 変換で担う（§5.2） |
 | `rspec` / `rubocop` | 開発依存 | spec / lint |
@@ -381,7 +381,7 @@ k8s-rails.request  payload: { operation: :list, group:, version:, plural:, names
 | **v0.1** | §5 の公開 API（CRD 宣言 / list / find / create / patch / 例外 / 計測 / スタブテスト）+ README | rspec 全緑 + **consumer アプリの K8s サービスを `k8s-rails` に移行して動作確認**（§12） |
 | **v0.2** | #16–#19 の公開 API 拡充・修正（cluster-scoped CRD `scope:` + `*_cluster` メソッド、`configure` のアトミック契約、`connected?` の注入契約、kruby loader 探索順序の修正）。設計書 v0.1.12（案） | rspec 全緑（クラスタ不要）+ 公開 gem push（v0.1.0 と同導線） |
 | **v0.3** | unified REST transport（`ApiClient#call_api` 上の統一 REST 層）で**対応リソースを全リソース（core v1 built-in 含）に拡大**＋`delete` / `delete_cluster` 追加（CRUD 完成）＋README QuickStart 改稿（Pod / Deployment CRUD を主例）。設計書 v0.1.15（案） | rspec 全緑（クラスタ不要）＋実クラスタ E2E（Pod / Deployment / Node 読み取り・ConfigMap create/patch/delete・readonly ゲート）＋公開 gem push（v0.1.0 と同導線） |
-| v0.4 | #28–#29 対応（対象名検証による一括削除防止、K1 ブリッジの動的同期で in-cluster トークンローテーション反映）、watch（`watch` メソッド、kruby の watch サポート上）、kind E2E の CI 化、Ruby 3.5 stable / 4.1 系の matrix 追加（リリースされたら検証の上追加。Ruby 3.5 preview / 4.0 は v0.2.1 で対応済み）、リトライポリシー | v0.3 運用のフィードバック |
+| v0.4 | #28–#29 対応（対象名検証による一括削除防止、K1 ブリッジの動的同期で in-cluster トークンローテーション反映）、watch（`watch` メソッド、kruby の watch サポート上）、kind E2E の CI 化、Ruby 3.5 stable / 4.1 系の matrix 追加（stable リリースされたら検証の上追加。Ruby 3.5 preview / 4.0 は v0.2.1 で対応済み。4.1.0-preview1 は公開済みだがツールチェーン不具合で保留 — #41）、リトライポリシー | v0.3 運用のフィードバック |
 | v0.5 | （展望）複数クラスタ（ネームスペース化された client 集合） | — |
 
 v0.1 の milestone 分割（開発セッション向けのタスク単位目安）:
@@ -459,14 +459,22 @@ PR の差分を最小化）。
     gemspec の宣言範囲（`>= 3.3, < 4.1`）で公開済みの Ruby を matrix で検証:
     3.3.0（下限・kruby 1.36.x の `>= 3.3`）・3.3.8（開発）・
     3.4.10（3.4 系の最新 stable）・3.5.0-preview1（3.5 系の唯一の公開
-    リリース・2026-09-22 にローカルで全 suite / rubocop 検証済み）・
+    リリース・2026-09-22 にローカルで全 suite / rubocop 検証済み、
+    kruby 1.36.5.2 で 2026-10-18 再検証）・
     4.0.7（4.0 系の最新 stable・2026-09-22 にローカルで全 suite /
-    rubocop 検証済み）。
-    **宣言範囲を常に matrix がカバーする**こと（`< 4.1` 上限により
-    4.1 系以降のリリースは宣言範囲外。RubyGems は version requirement で
-    集合和を表現できないため、未検証 minor を区間で挟み込む形
-    （`< 5.0` 等）は取らない — matrix 追加と範囲拡大をセットで行う。
-    3.5 stable / 4.1 系等 stable 化された新リリースが出たら
+    rubocop 検証済み、kruby 1.36.5.2 で 2026-10-18 再検証）。
+    **Ruby 4.1.0-preview1**（2026-10-17 公開・ruby/ruby タグ実測）は
+    `4.1.0.preview1 < 4.1` で宣言範囲内だが matrix 未追加 —
+    preview1 環境では `bundle install` が RubyGems/Bundler 既知の
+    `uninitialized constant Pathname::SEPARATOR_PAT`（Bundler 4.0.23 でも
+    再現・ローカル実測 2026-10-17）で失敗し、検証基盤が動かない。
+    rubygems の修正後または 4.1 stable リリース時に matrix へ追加する。
+    RubyGems の version requirement は集合和を表現できないため、
+    preview1 のみを区間から除外する書き方は存在しない。
+    **宣言範囲を常に matrix がカバーする**こと（RubyGems は
+    version requirement で集合和を表現できないため、未検証 minor を区間で
+    挟み込む形（`< 5.0` 等）は取らない — matrix 追加と範囲拡大をセットで
+    行う。3.5 stable / 4.1 系等 stable 化された新リリースが出たら
     matrix への追加を忘れないこと）。
     テストはクラスタ不要（§9・スタブ注入）のため v0.1 は runner 上のユニットのみ。
     kind / 実クラスタ E2E の CI 化は v0.4 対象（§9・§10）
@@ -499,3 +507,4 @@ PR の差分を最小化）。
 | 0.1.19 | 2026-10-14 | Issue #30 対応: 接続設定の解決・クライアント生成段階（`Client.build` / `connected?` → `build_configuration`）での `Kubernetes::ConfigError` を `K8sRails::Unavailable` に**統一**（元例外を `cause` に保持 — rescue 内 raise の自動 cause。通信時の adapter / probe 変換と同一契約で、raw `ConfigError` は公開されない）。§5.4 変換規則表に ConfigError 行を追加・§5.4 例外ツリーの説明を同期・README 例外ツリーも同期。rescue は `ConfigError` のみの狭い形で、`NoMethodError` 等のプログラミングエラーは変換せず伝播。回帰テスト: 不正 context（kubeconfig の `current-context: missing`）で `Resource.list` / `connected?` の双方が `Unavailable` + `cause` = ConfigError | 実装反映済み |
 | 0.1.20 | 2026-10-14 | Issue #31 対応: `connected?` が **Resource 操作と同じキャッシュ済み接続を検査**するように改訂 — 解決済み config を cached transport の寿命とともに memoize（`@resolved_connection_config`）し、`Client.build` と `connected?` の双方が同一解決結果を使用。旧実装は `connected?` が毎回 `build_configuration` を再解決し、設定解決結果が変わった場合にプローブは新しい接続 (B) を検査する一方 Resource 操作は旧接続 (A) を使い続ける不整合があった。暗黙の再解決はせず、明示的な再読み込み経路は `reset!`（§5.1）。解決失敗時は memoize せず次回再試行。§5.2（build 手順・connected? 解決順序）と README Connectivity check を同期。回帰テスト: `default_config` が接続 A → B の順で返す環境で (1) probe が A に対して発行されること（B 実測 0 リクエスト・2 つのローカル HTTP サーバで実測）、(2) `reset!` 後に B へ切り替わること。④PR #39 レビュー対応（Codex P2 + Copilot 同一指摘）: memoize（`||=`）は非アトミックで、スレッド環境で初回 Resource 操作と初回 `connected?` が並行すると双方が `build_configuration` を実行し後書き勝ちで再び接続不一致を起こし得る → `Client::BUILD_LOCK`（Mutex）を導入し、初回の config 解決・K1 橋渡し・transport 生成を同一クリティカルセクションに閉じた（プローブの HTTP I/O はロック外）。`reset!` も同一ロックで build との交錯を防ぐ。決定論的並行回帰テスト: 解決スタブが入口を観測できるよう待ち合わせし、(a) 解決呼び出しが厳密に 1 回（ロック待ちの 2 スレッド目は入口に入れない）(b) op/probe がともに接続 A へ発行（B 実測 0 リクエスト）を検証 — 修正前 lib でこの spec は失敗（revert-proof） | 実装反映済み |
 | 0.1.21 | 2026-10-15 | Issue #33 対応: **既定の HTTP タイムアウト導入（挙動変更・#33）**。kruby 1.36.x の既定 `timeout = 0` は libcurl 上**無制限待ち**で、応答しない API が Rails のリクエスト / ジョブを占有し得る。`config.http_timeout`（既定 30 秒）を新設し、接続解決時に解決済み接続の `timeout` が未設定値 `0` のときのみ適用（明示設定は上書きしない。`http_timeout = 0` で無制限にオプトアウト — kruby 側 `0` は未設定と区別できないためオプトアウトは gem 側キーで行う。適用は冪等）。`Resource` 操作と `connected?` の双方に同一適用（§5.2 共通経路）。非負 Integer / `nil` 以外は `ArgumentError`（Float は libcurl で `0`=無制限に丸められるため fail-fast）。README に実行可能な設定例（kruby 読み込み含む）・kruby 既定 `0` = 無制限であること・kruby `retry_configuration` 使用時の総待ち時間が `max_retries` に依存する点（タイムアウト自体は kruby 実装上リトライ対象外）を追記。§11 の「retries / timeout」検討事項を実装済み方針に更新。実測: 3 秒遅延ループバックに対し `timeout = 1` で Resource 操作と `connected?` が双方 ~1.01 秒で `Unavailable`。※版数 0.1.20 はオープン PR #39（#31）が使用（並行 PR の事前割当規約） | 実装反映済み |
+| 0.1.22 | 2026-10-18 | Issue #41 対応: kruby 1.36.5.2（2026-10-17 公開）への追従検証 — §6 pin（`~> 1.36.0`）は 1.36.5.2 を既に許容するため **pin 変更なし**。1.36.2.1 と 1.36.5.2 の gem lib 差分を実測で確認（version.rb の VERSION 文字列のみ・kruby CHANGELOG の記載と一致し OpenAPI・挙動契約は不変）→ §7 の 3 事実（call_api シグネチャ / K1 橋渡し事実 / loader 探索順序）は lib 同一のため機械的に成立。全 suite（132 examples / 0 failures・22 files no offenses）を Ruby 3.3.8 / 3.5.0-preview1 / 4.0.7 で再実測。kruby 1.36.5.2 の新ランタイム依存 `logger`（Ruby 4.0 での bundled gem 昇格対応）は transitive で解決・consumer 変更不要。**Ruby 4.1.0-preview1 は 2026-10-17 公開**（ruby/ruby タグ実測）で `4.1.0.preview1 < 4.1` のため宣言区間内だが matrix に追加できない — preview1 環境で `bundle install` が RubyGems/Bundler 既知の `uninitialized constant Pathname::SEPARATOR_PAT`（Bundler 4.0.23 でも再現）で失敗（ローカル rbenv 4.1.0-preview1 実測 2026-10-17）。集合和表現不可のため区間から除外する書き方はなく、rubygems 修正後または 4.1 stable リリース時に matrix 追加。§6 / §10 / §13 / gemspec コメント / README / CI コメントを同期 | 実装反映済み |
