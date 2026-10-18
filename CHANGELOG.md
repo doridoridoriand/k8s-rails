@@ -91,14 +91,20 @@ All notable changes to `k8s-rails` are documented in this file.
   1.36.5.2 installed. kruby 1.36.5.2 declares `logger` as a runtime
   dependency (Ruby 4.0 promoted it to a bundled gem); it resolves
   transitively for this gem.
-- **Ruby 4.1.0-preview1 is not added to the CI matrix** (#41): it was
-  published on 2026-10-17 (ruby/ruby tags) and is technically inside the
-  declared range (`4.1.0.preview1 < 4.1`), but `bundle install` fails under
-  that Ruby with the upstream RubyGems/Bundler bug
+- **Ruby 4.1.0-preview1 is excluded from the declared range** (#41, PR #42
+  review): it was published on 2026-10-17 (ruby/ruby tags) and, because
+  `Gem.ruby_version` reports the prerelease form `4.1.0.preview1`, the
+  previous `>= 3.3, < 4.1` interval admitted it at runtime. The gemspec now
+  adds `!= 4.1.0.preview1` — RubyGems requirements are conjunctive, so a
+  single-version exclusion is expressible without a union (verified:
+  `4.1.0.preview1` rejected; `4.0.7` and `3.5.0.preview1` admitted; `4.1`
+  rejected). The preview stays out of the CI matrix because `bundle install`
+  fails under it with the upstream RubyGems/Bundler bug
   `uninitialized constant Pathname::SEPARATOR_PAT` (Bundler 4.0.23,
-  verified locally 2026-10-17), so no runnable CI shard exists yet. The
-  shard lands once rubygems fixes it or 4.1 goes stable. Ruby 4.0 support
-  itself is unaffected and re-verified on 4.0.7 (see above).
+  verified locally 2026-10-17); drop the exclusion and add the shard once
+  rubygems fixes it or 4.1 goes stable. `!=` excludes exactly one version,
+  so future previews (4.1.0.preview2+) need their own entries until then.
+  Ruby 4.0 support itself is unaffected and re-verified on 4.0.7 (see above).
 
 ## 0.3.1
 

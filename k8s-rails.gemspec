@@ -21,15 +21,19 @@ Gem::Specification.new do |spec|
   # 唯一のリリース・ruby/ruby タグ実測）で全 suite / rubocop を実行し緑を確認
   # （matrix に 4.0.7 / 3.5.0-preview1 を追加）。kruby 1.36.5.2（2026-10-17）でも
   # 3 系統を再実測（#41）。Ruby 4.1.0-preview1 は 2026-10-17 に ruby/ruby タグで
-  # 公開済みで、`4.1.0.preview1 < 4.1` のため技術的には本区間内だが、matrix に
-  # 追加できない（下記）。RubyGems の version requirement は集合和（union）を
-  # 表現できないため、preview1 のみを区間から除外する書き方は存在しない。
-  #   4.1.0-preview1 保留の理由（実測 2026-10-17・ローカル rbenv 4.1.0-preview1）:
-  #   `bundle install` が RubyGems/Bundler 既知の
-  #   `uninitialized constant Pathname::SEPARATOR_PAT`（Bundler 4.0.23 でも再現）
-  #   で失敗し、Bundler 依存の検証基盤自体が動かない。rubygems の修正後または
-  #   4.1 stable リリース時に matrix へ追加する。
-  spec.required_ruby_version = [">= 3.3", "< 4.1"]
+  # 公開済みで、Gem.ruby_version は prerelease 形式（実測: 4.1.0-preview1 →
+  # `4.1.0.preview1`）を報告するため `< 4.1` では除外されない（実測: 許容される）。
+  # そこで `!= 4.1.0.preview1` で**その 1 バージョンのみを除外**する（PR #42
+  # レビュー指摘・`Gem::Requirement` の conjunctive `!=` で実現 — 集合和は不要。
+  # 実測: 4.1.0.preview1 = 不許可 / 4.0.7・3.5.0.preview1 = 許可 / 4.1 = 不許可）。
+  # 4.1.0-preview1 を matrix に入れられない理由（実測 2026-10-17・ローカル
+  # rbenv 4.1.0-preview1）: `bundle install` が RubyGems/Bundler 既知の
+  # `uninitialized constant Pathname::SEPARATOR_PAT`（Bundler 4.0.23 でも再現）
+  # で失敗し、Bundler 依存の検証基盤自体が動かない。
+  # 注意: `!=` は名指した 1 バージョンのみ除外する。将来の preview
+  # （4.1.0.preview2 等）は再び区間内に現れるため、その都度 `!=` を追加するか
+  # 4.1 stable リリース時に上限を `< 4.2` に上げて matrix 追加で検証する。
+  spec.required_ruby_version = [">= 3.3", "< 4.1", "!= 4.1.0.preview1"]
 
   # RubyGems.org ページに source / changelog リンクを表示させるためのメタ情報。
   spec.metadata["source_code_uri"] = "https://github.com/doridoridoriand/k8s-rails"
