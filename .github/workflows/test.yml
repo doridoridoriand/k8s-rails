@@ -29,6 +29,15 @@ jobs:
         # 3.4.10 = 3.4 系の最新 stable、3.5.0-preview1 = 3.5 系の唯一の
         # 公開リリース、4.0.7 = 4.0 系の最新 stable。3.5.0-preview1 と
         # 4.0.7 は 2026-09-22 にローカルで全 suite / rubocop 検証済み。
+        # Ruby 4.1.0-preview1（2026-10-17 公開）は `!= 4.1.0.preview1` で
+        # 宣言区間から除外（#41・PR #42 レビュー指摘）: Gem.ruby_version は
+        # prerelease 形式 4.1.0.preview1 を報告し < 4.1 単独では除外されない
+        # （実測）。preview1 環境で bundle install が RubyGems/Bundler 既知の
+        # uninitialized constant Pathname::SEPARATOR_PAT（Bundler 4.0.23 でも
+        # 再現・ローカル実測 2026-10-17）で失敗し、検証基盤が動かない。
+        # rubygems 修正後または 4.1 stable リリース時に除外を外して追加する。
+        # != は 1 バージョンのみ除外のため、将来の preview
+        # （4.1.0.preview2 等）はその都度追加する（#41）。
         # stable 化された新 minor（3.5 stable / 4.1 系等）が出たら
         # matrix に追加する（宣言範囲 = 検証範囲・設計書 §13）。
         ruby: ["3.3.0", "3.3.8", "3.4.10", "3.5.0-preview1", "4.0.7"]

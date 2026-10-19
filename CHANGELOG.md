@@ -81,6 +81,30 @@ All notable changes to `k8s-rails` are documented in this file.
   own; kruby's optional `retry_configuration` re-runs the full request per
   retryable status, so the total wait scales with `max_retries` (timed-out
   requests are never retried) — documented in the README.
+- **kruby 1.36.5.2 compatibility verified** (#41): the dependency pin
+  (`~> 1.36.0`) already admits the new release, so no pin change and no
+  consumer change is needed. The client library source is byte-identical to
+  1.36.2.1 except the version string (verified by a gem-dir diff), so the
+  §7 upgrade facts (call_api signature, K1 bridge, config discovery order)
+  hold unchanged. The full suite (132 examples / 0 failures, 22 files no
+  offenses) was re-run on Ruby 3.3.8, 3.5.0-preview1, and 4.0.7 with kruby
+  1.36.5.2 installed. kruby 1.36.5.2 declares `logger` as a runtime
+  dependency (Ruby 4.0 promoted it to a bundled gem); it resolves
+  transitively for this gem.
+- **Ruby 4.1.0-preview1 is excluded from the declared range** (#41, PR #42
+  review): it was published on 2026-10-17 (ruby/ruby tags) and, because
+  `Gem.ruby_version` reports the prerelease form `4.1.0.preview1`, the
+  previous `>= 3.3, < 4.1` interval admitted it at runtime. The gemspec now
+  adds `!= 4.1.0.preview1` — RubyGems requirements are conjunctive, so a
+  single-version exclusion is expressible without a union (verified:
+  `4.1.0.preview1` rejected; `4.0.7` and `3.5.0.preview1` admitted; `4.1`
+  rejected). The preview stays out of the CI matrix because `bundle install`
+  fails under it with the upstream RubyGems/Bundler bug
+  `uninitialized constant Pathname::SEPARATOR_PAT` (Bundler 4.0.23,
+  verified locally 2026-10-17); drop the exclusion and add the shard once
+  rubygems fixes it or 4.1 goes stable. `!=` excludes exactly one version,
+  so future previews (4.1.0.preview2+) need their own entries until then.
+  Ruby 4.0 support itself is unaffected and re-verified on 4.0.7 (see above).
 
 ## 0.3.1
 
