@@ -1,8 +1,8 @@
 # k8s-rails 設計書
 
 - 文書番号: KBR-DESIGN-001
-- 版: 0.1.22（案）
-- 日付: 2026-10-18
+- 版: 0.1.23（案）
+- 日付: 2026-10-19
 - 対象リポジトリ: k8s-rails（本設計の実装先）
 - ライセンス: MIT（LICENSE は main に既存）
 
@@ -41,7 +41,7 @@ K8s CRD を扱えるようにし、(b) 実際の consumer アプリをこの gem
 ### 2.2 非スコープ（本設計の外）
 
 - **core v1 リソースの CustomObjects 経路でのアクセス** — 2026-09-22 に**解消済み**（unified REST transport 導入、§5.2 改訂）。以前は core v1（Pod / Service / ConfigMap / Node 等）が `/api/v1/...`（group 区間なし）のため `CustomObjectsApi` では扱えず、`group: ""` 宣言は 404 になった。**named-group の built-in（apps/v1 の Deployment 等）は CustomObjects 経路でも動作していた**（generic な `/apis/{group}/...` クライアントのため）。現在の transport は `Kubernetes::ApiClient#call_api` 上の統一 REST 層で、core v1（`group: ""` → `/api/v1/...`）・named built-in・CRD を 1 つの経路で扱う
-- **watch（ストリーム）** — v0.1 では非対応。kruby の watch は get/list より成熟度が低く、初版の API 保証範囲から外す（§10 で v0.4 対象）
+- **watch（ストリーム）** — v0.1 では非対応。kruby の watch は get/list より成熟度が低く、初版の API 保証範囲から外す（§10 で v0.5 対象）
 - アプリの**デプロイ**（helm / kustomize 生成等） — `kuby-core` の領域
 - RBAC 権限の付与・管理 — 呼び出しアプリ側の ClusterRole/Role の責務
 - 複数クラスタ同時接続 — v0.1 は単一クラスタ前提（§11 展望）
@@ -106,7 +106,7 @@ k8s-rails/
 ├── lib/
 │   ├── k8s-rails.rb         # エントリ。require 集 + モジュール定義
 │   └── k8s_rails/
-│       ├── version.rb       # VERSION = "0.3.1"
+│       ├── version.rb       # VERSION = "0.4.0"
 │       ├── configuration.rb # Config: namespace, connection, 計測 ON/OFF
 │       ├── client.rb        # 接続解決・BearerToken 橋渡し・計測ラップ
 │       ├── crd.rb           # K8sRails.crd 宣言 → Resource 生成
@@ -371,7 +371,7 @@ k8s-rails.request  payload: { operation: :list, group:, version:, plural:, names
 | 設定 | spec 間で `K8sRails.reset!` | 宣言の破棄・再接続 |
 | 集積（任意） | GitHub Actions で **kind**（または既存 microk8s に接続するジョブ）で実クラスタ E2E | v0.1 の必須ではない。**推奨**: consumer アプリ移行時の検証を兼ねる |
 
-- 本設計では CI は `rspec` + `rubocop` のみを必須とし、kind E2E は v0.4 で
+- 本設計では CI は `rspec` + `rubocop` のみを必須とし、kind E2E は v0.5 で
   GitHub Actions の追加として扱う（実クラスタへの接続 CI はネットワーク依存のため採用しない）。
 
 ## 10. リリース計画
@@ -381,8 +381,9 @@ k8s-rails.request  payload: { operation: :list, group:, version:, plural:, names
 | **v0.1** | §5 の公開 API（CRD 宣言 / list / find / create / patch / 例外 / 計測 / スタブテスト）+ README | rspec 全緑 + **consumer アプリの K8s サービスを `k8s-rails` に移行して動作確認**（§12） |
 | **v0.2** | #16–#19 の公開 API 拡充・修正（cluster-scoped CRD `scope:` + `*_cluster` メソッド、`configure` のアトミック契約、`connected?` の注入契約、kruby loader 探索順序の修正）。設計書 v0.1.12（案） | rspec 全緑（クラスタ不要）+ 公開 gem push（v0.1.0 と同導線） |
 | **v0.3** | unified REST transport（`ApiClient#call_api` 上の統一 REST 層）で**対応リソースを全リソース（core v1 built-in 含）に拡大**＋`delete` / `delete_cluster` 追加（CRUD 完成）＋README QuickStart 改稿（Pod / Deployment CRUD を主例）。設計書 v0.1.15（案） | rspec 全緑（クラスタ不要）＋実クラスタ E2E（Pod / Deployment / Node 読み取り・ConfigMap create/patch/delete・readonly ゲート）＋公開 gem push（v0.1.0 と同導線） |
-| v0.4 | #28–#29 対応（対象名検証による一括削除防止、K1 ブリッジの動的同期で in-cluster トークンローテーション反映）、watch（`watch` メソッド、kruby の watch サポート上）、kind E2E の CI 化、Ruby 3.5 stable / 4.1 系の matrix 追加（stable リリースされたら検証の上追加。Ruby 3.5 preview / 4.0 は v0.2.1 で対応済み。4.1.0-preview1 は公開済みだがツールチェーン不具合で保留 — #41）、リトライポリシー | v0.3 運用のフィードバック |
-| v0.5 | （展望）複数クラスタ（ネームスペース化された client 集合） | — |
+| **v0.4** | post-v0.3 バッチ: #28（対象名検証による一括削除防止 — `find` / `patch` / `delete`（cluster 版を含む）が `nil` / 空文字列 / `.` / `..` を通信前に `ArgumentError` で拒否）、#29（K1 ブリッジを全リクエストで再同期 — in-cluster ServiceAccount トークンローテーション反映・app の明示設定は上書きしない）、#30（kubeconfig 読み込み失敗を `Unavailable` に統一 — 元例外を `cause` 保持）、#31（`connected?` が Resource 操作と同一キャッシュ接続を検査・初回解決 + K1 ブリッジ + transport 生成を直列化）、#32（通知を ActiveSupport ブロック形式に移行 — 標準 `exception` / 実処理時間）、#33（**既定 HTTP タイムアウト 30 秒 — 挙動変更**。明示値は保持・`http_timeout = 0` でオプトアウト）、#41（kruby 1.36.5.2 実測検証・Ruby 4.1.0-preview1 を宣言範囲から `!=` で除外）。設計書 v0.1.23（案） | rspec 全緑（クラスタ不要）＋README 実行例の実クラスタ検証（#33・#41）＋公開 gem push（v0.1.0 と同導線） |
+| v0.5 | watch（`watch` メソッド、kruby の watch サポート上）、kind E2E の CI 化、Ruby 3.5 stable / 4.1 stable の matrix 追加（stable リリースされたら検証の上追加。Ruby 3.5 preview / 4.0 は v0.2.1 で対応済み。4.1.0-preview1 はツールチェーン不具合（Bundler `Pathname::SEPARATOR_PAT`）で保留・宣言範囲から `!=` 除外済み — #41）、リトライポリシー | v0.4 運用のフィードバック |
+| v0.6 | （展望）複数クラスタ（ネームスペース化された client 集合） | — |
 
 v0.1 の milestone 分割（開発セッション向けのタスク単位目安）:
 
@@ -483,7 +484,7 @@ PR の差分を最小化）。
     3.5 stable / 4.1 系等 stable 化された新リリースが出たら
     matrix への追加を忘れないこと）。
     テストはクラスタ不要（§9・スタブ注入）のため v0.1 は runner 上のユニットのみ。
-    kind / 実クラスタ E2E の CI 化は v0.4 対象（§9・§10）
+    kind / 実クラスタ E2E の CI 化は v0.5 対象（§9・§10）
 - `README` に「kruby pin」「対応 k8s バージョン（実測 v1.33.x で検証済み）」「K1 橋渡しの背景」
   を明記する（検索でヒットする重要な注意点のため）
 
@@ -514,3 +515,4 @@ PR の差分を最小化）。
 | 0.1.20 | 2026-10-14 | Issue #31 対応: `connected?` が **Resource 操作と同じキャッシュ済み接続を検査**するように改訂 — 解決済み config を cached transport の寿命とともに memoize（`@resolved_connection_config`）し、`Client.build` と `connected?` の双方が同一解決結果を使用。旧実装は `connected?` が毎回 `build_configuration` を再解決し、設定解決結果が変わった場合にプローブは新しい接続 (B) を検査する一方 Resource 操作は旧接続 (A) を使い続ける不整合があった。暗黙の再解決はせず、明示的な再読み込み経路は `reset!`（§5.1）。解決失敗時は memoize せず次回再試行。§5.2（build 手順・connected? 解決順序）と README Connectivity check を同期。回帰テスト: `default_config` が接続 A → B の順で返す環境で (1) probe が A に対して発行されること（B 実測 0 リクエスト・2 つのローカル HTTP サーバで実測）、(2) `reset!` 後に B へ切り替わること。④PR #39 レビュー対応（Codex P2 + Copilot 同一指摘）: memoize（`||=`）は非アトミックで、スレッド環境で初回 Resource 操作と初回 `connected?` が並行すると双方が `build_configuration` を実行し後書き勝ちで再び接続不一致を起こし得る → `Client::BUILD_LOCK`（Mutex）を導入し、初回の config 解決・K1 橋渡し・transport 生成を同一クリティカルセクションに閉じた（プローブの HTTP I/O はロック外）。`reset!` も同一ロックで build との交錯を防ぐ。決定論的並行回帰テスト: 解決スタブが入口を観測できるよう待ち合わせし、(a) 解決呼び出しが厳密に 1 回（ロック待ちの 2 スレッド目は入口に入れない）(b) op/probe がともに接続 A へ発行（B 実測 0 リクエスト）を検証 — 修正前 lib でこの spec は失敗（revert-proof） | 実装反映済み |
 | 0.1.21 | 2026-10-15 | Issue #33 対応: **既定の HTTP タイムアウト導入（挙動変更・#33）**。kruby 1.36.x の既定 `timeout = 0` は libcurl 上**無制限待ち**で、応答しない API が Rails のリクエスト / ジョブを占有し得る。`config.http_timeout`（既定 30 秒）を新設し、接続解決時に解決済み接続の `timeout` が未設定値 `0` のときのみ適用（明示設定は上書きしない。`http_timeout = 0` で無制限にオプトアウト — kruby 側 `0` は未設定と区別できないためオプトアウトは gem 側キーで行う。適用は冪等）。`Resource` 操作と `connected?` の双方に同一適用（§5.2 共通経路）。非負 Integer / `nil` 以外は `ArgumentError`（Float は libcurl で `0`=無制限に丸められるため fail-fast）。README に実行可能な設定例（kruby 読み込み含む）・kruby 既定 `0` = 無制限であること・kruby `retry_configuration` 使用時の総待ち時間が `max_retries` に依存する点（タイムアウト自体は kruby 実装上リトライ対象外）を追記。§11 の「retries / timeout」検討事項を実装済み方針に更新。実測: 3 秒遅延ループバックに対し `timeout = 1` で Resource 操作と `connected?` が双方 ~1.01 秒で `Unavailable`。※版数 0.1.20 はオープン PR #39（#31）が使用（並行 PR の事前割当規約） | 実装反映済み |
 | 0.1.22 | 2026-10-18 | Issue #41 対応: kruby 1.36.5.2（2026-10-17 公開）への追従検証 — §6 pin（`~> 1.36.0`）は 1.36.5.2 を既に許容するため **pin 変更なし**。1.36.2.1 と 1.36.5.2 の gem lib 差分を実測で確認（version.rb の VERSION 文字列のみ・kruby CHANGELOG の記載と一致し OpenAPI・挙動契約は不変）→ §7 の 3 事実（call_api シグネチャ / K1 橋渡し事実 / loader 探索順序）は lib 同一のため機械的に成立。全 suite（132 examples / 0 failures・22 files no offenses）を Ruby 3.3.8 / 3.5.0-preview1 / 4.0.7 で再実測。kruby 1.36.5.2 の新ランタイム依存 `logger`（Ruby 4.0 での bundled gem 昇格対応）は transitive で解決・consumer 変更不要。matrix 未追加の理由（preview1 環境で `bundle install` が RubyGems/Bundler 既知の `uninitialized constant Pathname::SEPARATOR_PAT`（Bundler 4.0.23 でも再現）で失敗・ローカル rbenv 4.1.0-preview1 実測）は gemspec / README / §6・§13 / CI コメントに記録。**PR #42 レビュー指摘で修正**: 初版の「RubyGems は集合和を表現できないため除外不能」は誤り — `Gem::Requirement` の conjunctive `!=` で単一バージョン除外は可能（実測: 4.1.0.preview1 不許可 / 4.0.7・3.5.0.preview1 許可 / 4.1 不許可）で、gemspec を `">= 3.3"` / `"< 4.1"` / `"!= 4.1.0.preview1"` の 3 件の conjunctive requirement に改訂。Gem.ruby_version は preview でも prerelease 形式（`4.1.0.preview1`）を報告し `< 4.1` 単独では除外されない実測も追記。`!=` は 1 バージョンのみ除外のため将来の preview はその都度追加または 4.1 stable 時に上限 `< 4.2` へ。§6 / §10 / §13 / gemspec / README / CI コメント / CHANGELOG を同期 | 実装反映済み |
+| 0.1.23 | 2026-10-19 | v0.4.0 リリース準備: ①`VERSION` を 0.3.1 → **0.4.0**（version.rb + version spec。#33 が既定タイムアウト導入という挙動変更を含むため minor バンプ — patch ではない）②CHANGELOG の `Unreleased`（#28–#33・#41 分）を **0.4.0** に確定（タグ時点で Unreleased バケットを残さない）③README の install pin（`~> 0.3` → `~> 0.4`）・`VERSION` 例・Roadmap 見出し（v0.4+ → v0.5+）同期と Ruby 4.1 stable 時の解除手順（`!=` 除外の削除・`< 4.2` 拡張・matrix 追加）追記④§10 リリース計画表で v0.4 行を「実際にリリースした内容」（#28–#33・#41）に書き換え、旧 v0.4 予定内容（watch / kind E2E CI 化 / matrix 追加 / リトライポリシー）を v0.5 へ、複数クラスタ展望を v0.6 へ移動⑤§2.2 / §9 / §13 / test.yml コメントの旧版参照を v0.5 に修正（test.yml コメントは v0.3 表記のまま残存していたため併せて修正） | 実装反映済み |

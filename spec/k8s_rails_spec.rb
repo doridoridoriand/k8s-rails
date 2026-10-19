@@ -4,7 +4,7 @@ require "spec_helper"
 
 RSpec.describe K8sRails do
   it "exposes a version number" do
-    expect(described_class::VERSION).to eq("0.3.1")
+    expect(described_class::VERSION).to eq("0.4.0")
   end
 
   it "does not require kruby at load time (lazy, §3 data-flow principle)" do
