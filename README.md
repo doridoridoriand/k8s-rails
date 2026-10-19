@@ -25,12 +25,12 @@ For the design rationale, see the [design document (docs/design.md)](docs/design
 
 ```ruby
 # Gemfile
-gem "k8s-rails", "~> 0.3"
+gem "k8s-rails", "~> 0.4"
 ```
 
 ```ruby
 require "k8s-rails"
-K8sRails::VERSION # => "0.3.1"
+K8sRails::VERSION # => "0.4.0"
 ```
 
 `require` is side-effect-free and needs no cluster. kruby itself is loaded
@@ -423,10 +423,14 @@ override, stops syncing, and your value stays authoritative. If you see 401s
 from a cluster connection that relies on kruby's own configuration behavior
 (outside this gem), check this token-key issue first.
 
-## Roadmap (v0.4+)
+## Roadmap (v0.5+)
 
 - Update the CI matrix when Ruby 3.5 reaches a stable release (3.5 is
   verified today on 3.5.0-preview1, the only released 3.5)
+- When Ruby 4.1 goes stable, drop the `!= 4.1.0.preview1` gemspec
+  exclusion, extend the declared range to `< 4.2`, and add 4.1 to the
+  matrix after verification (the preview is excluded until the upstream
+  Bundler `Pathname::SEPARATOR_PAT` bug is fixed)
 - CI-based E2E tests using kind
 - watch (streaming) support, under consideration
 

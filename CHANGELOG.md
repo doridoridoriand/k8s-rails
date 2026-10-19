@@ -2,7 +2,7 @@
 
 All notable changes to `k8s-rails` are documented in this file.
 
-## Unreleased
+## 0.4.0
 
 - **kubeconfig load failures now surface as `K8sRails::Unavailable`** (#30):
   `Kubernetes::Configuration.default_config` runs before any request, so a
