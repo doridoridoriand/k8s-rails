@@ -432,9 +432,13 @@ The suite is layered by how much of the real stack it touches (#34):
    cluster (`bundle exec rake e2e`, see `scripts/e2e_kind.rb`):
    `connected?`, cluster-scoped reads, namespaced CRUD with both delete
    response shapes (immediate -> Status, graceful -> the object itself),
-   and cleanup assertions. The script refuses to run unless the current
-   kubectl context starts with `kind-`, so a personal kubeconfig is never
-   targeted; every test object is deleted at exit. Run:
+   and cleanup assertions. The script refuses to run unless the target
+   kubectl context (the current one, or `E2E_KIND_CONTEXT`) starts with
+   `kind-`; it then exports a private kubeconfig snapshot containing only
+   that context and pins `KUBECONFIG` to the snapshot, so a personal
+   kubeconfig is never targeted and a concurrently-modified kubeconfig can
+   not switch the target mid-run. Every test object is deleted at exit, and
+   a cleanup error fails the run. Run:
 
    ```
    kind create cluster --name k8s-rails-e2e
