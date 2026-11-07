@@ -1,8 +1,11 @@
-# テスト: push / PR 時に rspec + rubocop を実行。
+# テスト: push / PR 時に 2 つのジョブを実行（#34・設計書 §9）。
 #
-# 本 gem のテストはクラスタ不要（§9・transport スタブ注入）なので
-# runner は ubuntu-latest + Ruby のみ。kind / 実クラスタ E2E は
-# v0.5 の CI 化対象（設計書 §9・§10）で、v0.1 では手動検証（§12）。
+# - rspec-rubocop: クラスタ不要の rspec + rubocop マトリクス（単体層 +
+#   実 kruby トランスポートのループバック層を含む。runner は ubuntu-latest + Ruby のみ）。
+# - e2e-kind: 隔離 kind クラスタでの実 E2E（scripts/e2e_kind.rb + `rake e2e`）。
+#   実クラスタ経路（接続・認証ヘッダー・CRUD・削除レスポンス形状）を検証する。
+#   スクリプトのガードが `kind-*` コンテキスト以外での実行を拒否するため、
+#   個人 kubeconfig は決して対象にならない。
 name: Test
 
 on:
@@ -61,5 +64,31 @@ jobs:
           BUNDLE_FORCE_RUBY_PLATFORM: ${{ matrix.ruby == '3.5.0-preview1' && '1' || '' }}
       - name: Run rspec + rubocop
         run: bundle exec rake
+
+  e2e-kind:
+    # 隔離 kind クラスタでの実 E2E（#34・設計書 §9）。rspec + rubocop
+    # マトリクスとは役割が異なる: こちらは実クラスタ経路（接続・認証・CRUD・
+    # 削除レスポンス形状・後処理）を検証する。Ruby は開発バージョン
+    # （3.3.8）のみ — 他の Ruby 系統は rspec マトリクスで担保する。
+    # helm/kind-action は kind と kubectl をインストールする（公式ドキュメント
+    # の推奨導線）。kubeconfig は明示パスに書き出し、`rake e2e` 実行時の
+    # KUBECONFIG で同じファイルを kubectl（ガード）と kruby（接続解決）が共有する。
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Ruby
+        uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: "3.3.8"
+          bundler-cache: true
+      - name: Create kind cluster
+        uses: helm/kind-action@v1
+        with:
+          cluster_name: k8s-rails-e2e
+          kubeconfig: /tmp/k8s-rails-e2e-kubeconfig
+      - name: Run kind E2E
+        run: bundle exec rake e2e
+        env:
+          KUBECONFIG: /tmp/k8s-rails-e2e-kubeconfig
 # matrix は「宣言された下限（3.3.0 = kruby 1.36.x の required_ruby_version）」と
 # 開発バージョン（.ruby-version の 3.3.8）。下限を飛ばすと宣言と検証がズレる。

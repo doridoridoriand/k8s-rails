@@ -8,4 +8,9 @@ RSpec::Core::RakeTask.new(:spec)
 
 RuboCop::RakeTask.new(:rubocop)
 
+desc "Run the kind-cluster E2E suite (requires a kind-* kubectl context; see scripts/e2e_kind.rb)"
+task :e2e do
+  sh "bundle exec ruby scripts/e2e_kind.rb"
+end
+
 task default: %i[spec rubocop]

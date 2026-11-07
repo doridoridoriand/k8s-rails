@@ -1,8 +1,8 @@
 # k8s-rails 設計書
 
 - 文書番号: KBR-DESIGN-001
-- 版: 0.1.23（案）
-- 日付: 2026-10-19
+- 版: 0.1.25（案）
+- 日付: 2026-11-07
 - 対象リポジトリ: k8s-rails（本設計の実装先）
 - ライセンス: MIT（LICENSE は main に既存）
 
@@ -369,10 +369,13 @@ k8s-rails.request  payload: { operation: :list, group:, version:, plural:, names
 |---|---|---|
 | ユニット | `K8sRails.config.api_client` に**スタブ**（kruby `ApiClient#call_api` と同型の 1 メソッド `call_api(http_method, path, opts)` を実装する素のオブジェクト。`http_method` は `:GET` / `:POST` / `:PATCH` / `:DELETE`、`path` は宣言座標から構築された REST パス（core v1 `/api/v1/...` / named `/apis/{group}/{version}/...`）、戻り値 `[data, status_code, headers]`。`StringKeyedAdapter` がこの形式を呼ぶ）を注入 | client（橋渡し・例外変換・パス構築）、resource（整形・readonly 制限・スコープ制限）、crd（メソッド生成・scope 検証） |
 | 設定 | spec 間で `K8sRails.reset!` | 宣言の破棄・再接続 |
-| 集積（任意） | GitHub Actions で **kind**（または既存 microk8s に接続するジョブ）で実クラスタ E2E | v0.1 の必須ではない。**推奨**: consumer アプリ移行時の検証を兼ねる |
+| 実トランスポートのループバック層（#34） | **実際の kruby `ApiClient`**（typhoeus / libcurl パイプライン）をループバック HTTP サーバに対して駆動（`spec/support/recording_http_server.rb`）。接続録画（method / path / Content-Type / Authorization / body）とカナリアレスポンスで、配線そのもの（URL・メソッド・Content-Type・認証ヘッダー・デシリアライズ・K3 変換・kubeconfig ファイル解決・有限 timeout・接続拒否 / 切断 → `Unavailable`）を固定する。スタブ層だけでは #28〜#32 の不具合を検出できなかった（URL 正規化と認証ヘッダー生成を通らないため） | 実配線契約・エラー変換・設定解決・タイムアウト境界 |
+| kind E2E（#34） | 隔離 kind クラスタで実クラスタ経路を検証（`scripts/e2e_kind.rb` + `rake e2e`）。ガード: `kubectl config current-context` が `kind-*` でなければ**実行を拒否**（個人 kubeconfig を対象にしないため）。接続・cluster 読み取り・namespaced CRUD・削除レスポンス形状（即時削除 = Status / graceful = オブジェクト本体）・後処理アサーション（全テストオブジェクトを exit 時に消去） | 実クラスタ経路の統合検証 |
 
-- 本設計では CI は `rspec` + `rubocop` のみを必須とし、kind E2E は v0.5 で
-  GitHub Actions の追加として扱う（実クラスタへの接続 CI はネットワーク依存のため採用しない）。
+- CI は 2 ジョブで役割を分離する（#34）: `rspec-rubocop` マトリクス（宣言 Ruby
+  全系統・クラスタ不要）と `e2e-kind` ジョブ（開発バージョン 1 系統 +
+  helm/kind-action による隔離 kind クラスタ）。実クラスタへの常時接続 CI は
+  ネットワーク依存のため採用しない（kind はジョブ内で完結する）。
 
 ## 10. リリース計画
 
@@ -483,8 +486,9 @@ PR の差分を最小化）。
     取らない — matrix 追加と範囲拡大をセットで行う。
     3.5 stable / 4.1 系等 stable 化された新リリースが出たら
     matrix への追加を忘れないこと）。
-    テストはクラスタ不要（§9・スタブ注入）のため v0.1 は runner 上のユニットのみ。
-    kind / 実クラスタ E2E の CI 化は v0.5 対象（§9・§10）
+    テストはクラスタ不要（§9・スタブ注入 + 実トランスポートのループバック層）。
+    kind E2E の CI 化は実装済み（#34・§9: `e2e-kind` ジョブ。rspec + rubocop
+    マトリクスと役割分離）。
 - `README` に「kruby pin」「対応 k8s バージョン（実測 v1.33.x で検証済み）」「K1 橋渡しの背景」
   を明記する（検索でヒットする重要な注意点のため）
 
@@ -516,3 +520,4 @@ PR の差分を最小化）。
 | 0.1.21 | 2026-10-15 | Issue #33 対応: **既定の HTTP タイムアウト導入（挙動変更・#33）**。kruby 1.36.x の既定 `timeout = 0` は libcurl 上**無制限待ち**で、応答しない API が Rails のリクエスト / ジョブを占有し得る。`config.http_timeout`（既定 30 秒）を新設し、接続解決時に解決済み接続の `timeout` が未設定値 `0` のときのみ適用（明示設定は上書きしない。`http_timeout = 0` で無制限にオプトアウト — kruby 側 `0` は未設定と区別できないためオプトアウトは gem 側キーで行う。適用は冪等）。`Resource` 操作と `connected?` の双方に同一適用（§5.2 共通経路）。非負 Integer / `nil` 以外は `ArgumentError`（Float は libcurl で `0`=無制限に丸められるため fail-fast）。README に実行可能な設定例（kruby 読み込み含む）・kruby 既定 `0` = 無制限であること・kruby `retry_configuration` 使用時の総待ち時間が `max_retries` に依存する点（タイムアウト自体は kruby 実装上リトライ対象外）を追記。§11 の「retries / timeout」検討事項を実装済み方針に更新。実測: 3 秒遅延ループバックに対し `timeout = 1` で Resource 操作と `connected?` が双方 ~1.01 秒で `Unavailable`。※版数 0.1.20 はオープン PR #39（#31）が使用（並行 PR の事前割当規約） | 実装反映済み |
 | 0.1.22 | 2026-10-18 | Issue #41 対応: kruby 1.36.5.2（2026-10-17 公開）への追従検証 — §6 pin（`~> 1.36.0`）は 1.36.5.2 を既に許容するため **pin 変更なし**。1.36.2.1 と 1.36.5.2 の gem lib 差分を実測で確認（version.rb の VERSION 文字列のみ・kruby CHANGELOG の記載と一致し OpenAPI・挙動契約は不変）→ §7 の 3 事実（call_api シグネチャ / K1 橋渡し事実 / loader 探索順序）は lib 同一のため機械的に成立。全 suite（132 examples / 0 failures・22 files no offenses）を Ruby 3.3.8 / 3.5.0-preview1 / 4.0.7 で再実測。kruby 1.36.5.2 の新ランタイム依存 `logger`（Ruby 4.0 での bundled gem 昇格対応）は transitive で解決・consumer 変更不要。matrix 未追加の理由（preview1 環境で `bundle install` が RubyGems/Bundler 既知の `uninitialized constant Pathname::SEPARATOR_PAT`（Bundler 4.0.23 でも再現）で失敗・ローカル rbenv 4.1.0-preview1 実測）は gemspec / README / §6・§13 / CI コメントに記録。**PR #42 レビュー指摘で修正**: 初版の「RubyGems は集合和を表現できないため除外不能」は誤り — `Gem::Requirement` の conjunctive `!=` で単一バージョン除外は可能（実測: 4.1.0.preview1 不許可 / 4.0.7・3.5.0.preview1 許可 / 4.1 不許可）で、gemspec を `">= 3.3"` / `"< 4.1"` / `"!= 4.1.0.preview1"` の 3 件の conjunctive requirement に改訂。Gem.ruby_version は preview でも prerelease 形式（`4.1.0.preview1`）を報告し `< 4.1` 単独では除外されない実測も追記。`!=` は 1 バージョンのみ除外のため将来の preview はその都度追加または 4.1 stable 時に上限 `< 4.2` へ。§6 / §10 / §13 / gemspec / README / CI コメント / CHANGELOG を同期 | 実装反映済み |
 | 0.1.23 | 2026-10-19 | v0.4.0 リリース準備: ①`VERSION` を 0.3.1 → **0.4.0**（version.rb + version spec。#33 が既定タイムアウト導入という挙動変更を含むため minor バンプ — patch ではない）②CHANGELOG の `Unreleased`（#28–#33・#41 分）を **0.4.0** に確定（タグ時点で Unreleased バケットを残さない）③README の install pin（`~> 0.3` → `~> 0.4`）・`VERSION` 例・Roadmap 見出し（v0.4+ → v0.5+）同期と Ruby 4.1 stable 時の解除手順（`!=` 除外の削除・`< 4.2` 拡張・matrix 追加）追記④§10 リリース計画表で v0.4 行を「実際にリリースした内容」（#28–#33・#41）に書き換え、旧 v0.4 予定内容（watch / kind E2E CI 化 / matrix 追加 / リトライポリシー）を v0.5 へ、複数クラスタ展望を v0.6 へ移動⑤§2.2 / §9 / §13 / test.yml コメントの旧版参照を v0.5 に修正（test.yml コメントは v0.3 表記のまま残存していたため併せて修正） | 実装反映済み |
+| 0.1.25 | 2026-11-07 | Issue #34 対応: ①**実トランスポートのループバック層**（§9 新層）: 実 kruby `ApiClient`（typhoeus / libcurl）をループバック HTTP サーバ（`spec/support/recording_http_server.rb`・accept 待ちの parked スレッド規約）に対して駆動し、配線そのもの（core / named × namespaced / cluster のパス・CGI escape の透過性・POST / PATCH の Content-Type + JSON body・クラスタコレクション `/api/v1/namespaces`・深い文字列キー化・実 404 → `NotFound` / 実 401・403・500 → `ApiError`・`KUBECONFIG` ファイル解決）を回帰テスト化。タイムアウト境界は #33 の slow-response spec（実トランスポート・実タイムアウト）が担保 ②通信障害境界: 接続拒否・接続切断（accept 後 close）→ `Unavailable` への変換を実トランスポートで固定 ③**kind E2E**: `scripts/e2e_kind.rb` + `rake e2e` — ガード（`kubectl config current-context` が `kind-*` 以外で拒否・個人 kubeconfig を対象にしない）、接続・cluster 読み取り・namespaced CRUD（即時削除 = Status / graceful 削除 = オブジェクト本体）・後処理アサーション ④**CI**: `e2e-kind` ジョブ（helm/kind-action 公式導線・開発 Ruby 3.3.8 1 系統・rspec + rubocop マトリクスと役割分離）を test.yml に追加 ⑤README に検証層（ユニット / 実トランスポート・ループバック / kind E2E）と CI 役割を記載（EN）、Roadmap の kind E2E 項を実装済みに反映 ⑥§9・§13 を現状に同期。実測: ローカル kind クラスタで E2E 全項目合格 | 実装反映済み |

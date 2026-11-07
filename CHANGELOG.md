@@ -2,6 +2,31 @@
 
 All notable changes to `k8s-rails` are documented in this file.
 
+## Unreleased
+
+- **Testing: boundary-condition regression layer + kind E2E** (#34):
+  - New `spec/real_transport_spec.rb` drives the REAL kruby `ApiClient`
+    (typhoeus / libcurl pipeline) against loopback HTTP servers
+    (`spec/support/recording_http_server.rb`): the wire surface (URL paths
+    for core / named group × namespaced / cluster, CGI-escaping
+    transparency, HTTP methods, `Content-Type` negotiation, Authorization
+    header, request bodies), deep string-keyed deserialization, K3
+    conversion for real 404 / 401 / 403 / 500 responses, kubeconfig-file
+    resolution, and transport failures (connection refused / connection
+    dropped mid-request) surfacing as `K8sRails::Unavailable`. Finite
+    timeouts were already covered by the #33 slow-response specs (real
+    transport, real timeout).
+  - New `scripts/e2e_kind.rb` + `bundle exec rake e2e`: the real cluster
+    path against an isolated kind cluster — `connected?`, cluster-scoped
+    reads, namespaced CRUD, both delete response shapes, and cleanup
+    assertions. The script refuses to run unless the current kubectl
+    context starts with `kind-`, so a personal kubeconfig is never
+    targeted; every test object is deleted at exit.
+  - CI: a separate `e2e-kind` job (helm/kind-action, the documented
+    official route) runs the E2E on one Ruby (3.3.8) with its own kind
+    cluster, separate in role from the `rspec-rubocop` matrix (no cluster).
+  - README documents the three verification layers and the CI roles.
+
 ## 0.4.0
 
 - **kubeconfig load failures now surface as `K8sRails::Unavailable`** (#30):
