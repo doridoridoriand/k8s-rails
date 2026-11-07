@@ -1,8 +1,8 @@
 # k8s-rails 設計書
 
 - 文書番号: KBR-DESIGN-001
-- 版: 0.1.23（案）
-- 日付: 2026-10-19
+- 版: 0.1.24（案）
+- 日付: 2026-11-07
 - 対象リポジトリ: k8s-rails（本設計の実装先）
 - ライセンス: MIT（LICENSE は main に既存）
 
@@ -238,12 +238,12 @@ ClusterIssuer = K8sRails.crd(
 | `find(name)` | 必須 | 同型 or `K8sRails::NotFound`（raise） | 常に有効 |
 | `create(attributes)` | body hash | 作成済みオブジェクト（文字列キー） | `readonly: false` のみ |
 | `patch(name, operations)` | JSON Patch 操作配列 | 更新済みオブジェクト | `readonly: false` のみ |
-| `delete(name)` | 必須 | API の Status オブジェクト（文字列キー。`{"kind" => "Status", "status" => "Success", ...}`） | `readonly: false` のみ |
+| `delete(name)` | 必須 | API が返した削除結果をそのまま文字列キー化した Hash（即時削除なら Status オブジェクト、graceful な削除ではオブジェクト本体。下記の戻り値契約参照） | `readonly: false` のみ |
 | `list_cluster` | `{}` | 同上（クラスタ横断。`namespace:` なし） | 常に有効 |
 | `find_cluster(name)` | 必須 | 同上 or `K8sRails::NotFound` | 常に有効 |
 | `create_cluster(attributes)` | body hash | 作成済みオブジェクト | `readonly: false` のみ |
 | `patch_cluster(name, operations)` | JSON Patch 操作配列 | 更新済みオブジェクト | `readonly: false` のみ |
-| `delete_cluster(name)` | 必須 | API の Status オブジェクト（文字列キー） | `readonly: false` のみ |
+| `delete_cluster(name)` | 必須 | API が返した削除結果をそのまま文字列キー化した Hash（`delete` と同契約。下記参照） | `readonly: false` のみ |
 
 スコープの契約（#17 対応）:
 
@@ -261,6 +261,11 @@ ClusterIssuer = K8sRails.crd(
   `find` は存在しない場合 `K8sRails::NotFound` を raise（consumer アプリ側が `return nil` にしていたのは
   呼び出し側の都合。gem としては例外が明示的）。「存在しない場合は nil」が欲しい場合は
   `find_or_nil(name)` を併設する。
+- `delete` / `delete_cluster` の戻り値は**API が返した削除結果をそのまま文字列キー化した Hash** で、
+  固定形（Status）への変換はしない（#35）: 即時削除のリソース（実測: ConfigMap）では Status オブジェクト
+  （`{"kind" => "Status", "status" => "Success", ...}`）、graceful な削除（grace period や finalizer の遅延。
+  実測: Pod）ではオブジェクト本体（`metadata.deletionTimestamp` 付き）が返る。削除の**受付**と対象リソースの
+  **完全消滅**は別物で、後者は `find_or_nil(name)` で確認する。
 - `plural` / `kind` は自動推測しない（`workflows` / `Workflow` 等、推測が外れる CRD が多い）。
   宣言で必ず指定する（K5）。
 - 同名 CRD の再宣言は `K8sRails::RedeclarationError`（設定ミス検出）。
@@ -516,3 +521,4 @@ PR の差分を最小化）。
 | 0.1.21 | 2026-10-15 | Issue #33 対応: **既定の HTTP タイムアウト導入（挙動変更・#33）**。kruby 1.36.x の既定 `timeout = 0` は libcurl 上**無制限待ち**で、応答しない API が Rails のリクエスト / ジョブを占有し得る。`config.http_timeout`（既定 30 秒）を新設し、接続解決時に解決済み接続の `timeout` が未設定値 `0` のときのみ適用（明示設定は上書きしない。`http_timeout = 0` で無制限にオプトアウト — kruby 側 `0` は未設定と区別できないためオプトアウトは gem 側キーで行う。適用は冪等）。`Resource` 操作と `connected?` の双方に同一適用（§5.2 共通経路）。非負 Integer / `nil` 以外は `ArgumentError`（Float は libcurl で `0`=無制限に丸められるため fail-fast）。README に実行可能な設定例（kruby 読み込み含む）・kruby 既定 `0` = 無制限であること・kruby `retry_configuration` 使用時の総待ち時間が `max_retries` に依存する点（タイムアウト自体は kruby 実装上リトライ対象外）を追記。§11 の「retries / timeout」検討事項を実装済み方針に更新。実測: 3 秒遅延ループバックに対し `timeout = 1` で Resource 操作と `connected?` が双方 ~1.01 秒で `Unavailable`。※版数 0.1.20 はオープン PR #39（#31）が使用（並行 PR の事前割当規約） | 実装反映済み |
 | 0.1.22 | 2026-10-18 | Issue #41 対応: kruby 1.36.5.2（2026-10-17 公開）への追従検証 — §6 pin（`~> 1.36.0`）は 1.36.5.2 を既に許容するため **pin 変更なし**。1.36.2.1 と 1.36.5.2 の gem lib 差分を実測で確認（version.rb の VERSION 文字列のみ・kruby CHANGELOG の記載と一致し OpenAPI・挙動契約は不変）→ §7 の 3 事実（call_api シグネチャ / K1 橋渡し事実 / loader 探索順序）は lib 同一のため機械的に成立。全 suite（132 examples / 0 failures・22 files no offenses）を Ruby 3.3.8 / 3.5.0-preview1 / 4.0.7 で再実測。kruby 1.36.5.2 の新ランタイム依存 `logger`（Ruby 4.0 での bundled gem 昇格対応）は transitive で解決・consumer 変更不要。matrix 未追加の理由（preview1 環境で `bundle install` が RubyGems/Bundler 既知の `uninitialized constant Pathname::SEPARATOR_PAT`（Bundler 4.0.23 でも再現）で失敗・ローカル rbenv 4.1.0-preview1 実測）は gemspec / README / §6・§13 / CI コメントに記録。**PR #42 レビュー指摘で修正**: 初版の「RubyGems は集合和を表現できないため除外不能」は誤り — `Gem::Requirement` の conjunctive `!=` で単一バージョン除外は可能（実測: 4.1.0.preview1 不許可 / 4.0.7・3.5.0.preview1 許可 / 4.1 不許可）で、gemspec を `">= 3.3"` / `"< 4.1"` / `"!= 4.1.0.preview1"` の 3 件の conjunctive requirement に改訂。Gem.ruby_version は preview でも prerelease 形式（`4.1.0.preview1`）を報告し `< 4.1` 単独では除外されない実測も追記。`!=` は 1 バージョンのみ除外のため将来の preview はその都度追加または 4.1 stable 時に上限 `< 4.2` へ。§6 / §10 / §13 / gemspec / README / CI コメント / CHANGELOG を同期 | 実装反映済み |
 | 0.1.23 | 2026-10-19 | v0.4.0 リリース準備: ①`VERSION` を 0.3.1 → **0.4.0**（version.rb + version spec。#33 が既定タイムアウト導入という挙動変更を含むため minor バンプ — patch ではない）②CHANGELOG の `Unreleased`（#28–#33・#41 分）を **0.4.0** に確定（タグ時点で Unreleased バケットを残さない）③README の install pin（`~> 0.3` → `~> 0.4`）・`VERSION` 例・Roadmap 見出し（v0.4+ → v0.5+）同期と Ruby 4.1 stable 時の解除手順（`!=` 除外の削除・`< 4.2` 拡張・matrix 追加）追記④§10 リリース計画表で v0.4 行を「実際にリリースした内容」（#28–#33・#41）に書き換え、旧 v0.4 予定内容（watch / kind E2E CI 化 / matrix 追加 / リトライポリシー）を v0.5 へ、複数クラスタ展望を v0.6 へ移動⑤§2.2 / §9 / §13 / test.yml コメントの旧版参照を v0.5 に修正（test.yml コメントは v0.3 表記のまま残存していたため併せて修正） | 実装反映済み |
+| 0.1.24 | 2026-11-07 | Issue #35 対応（docs のみ・コード変更なし）: `delete` / `delete_cluster` の戻り値を「**API が返した削除結果をそのまま文字列キー化した Hash**」に訂正（0.1.14 時点の Status 固定一般化を撤廃。実測: 即時削除 = Status オブジェクト `status: "Success"`、graceful な削除 = オブジェクト本体 + `metadata.deletionTimestamp` — K8s 1.36.1 実クラスタで ConfigMap / Pod の DELETE レスポンスを採取）+ 削除の**受付**と**完全消滅**の区別（`find_or_nil` で確認）を明記。§5.3 のメソッド表と戻り値契約の bullet、README（Pod 削除例 + 「What delete returns」節）、`Resource#delete` コメント、CHANGELOG（0.3.0 項の訂正 + Unreleased 追記）を同期。双方のレスポンス形状のパススルーを spec で担保 | 実装反映済み |

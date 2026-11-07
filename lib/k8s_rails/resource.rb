@@ -59,8 +59,11 @@ module K8sRails
         end
       end
 
-      # Delete a named object; returns the API status object. Same readonly
-      # restriction; raises NotFound when already gone.
+      # Delete a named object. The return value is the API's delete response
+      # as-is, deep-stringified (#35): a Status object for immediately-deleted
+      # resources, the object itself (with `metadata.deletionTimestamp`) for
+      # graceful deletion (e.g. Pods under their default grace period). Same
+      # readonly restriction; raises NotFound when already gone.
       def delete(name, namespace: resolved_namespace)
         run_operation(:delete, :namespaced, namespace: namespace, writable: true, object_name: name) do
           transport.delete(group_name, version_name, namespace, plural_name, name)

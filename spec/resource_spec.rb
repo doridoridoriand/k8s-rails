@@ -113,7 +113,7 @@ RSpec.describe K8sRails::Resource do
       expect(@fake.calls).to be_empty
     end
 
-    it "calls the transport on a readonly: false declaration and returns the status" do
+    it "calls the transport on a readonly: false declaration and returns the API's delete response as-is (#35)" do
       w = K8sRails.crd(group: "g", version: "v1", plural: "p", kind: "W2", readonly: false)
       out = w.delete("w-1")
 
