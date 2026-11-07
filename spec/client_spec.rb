@@ -496,9 +496,20 @@ RSpec.describe K8sRails::Client do
       expect(out).to eq("metadata" => { "name" => "wf-1" }, "patched" => true)
     end
 
-    it "deep-stringifies delete responses (API status object)" do
+    it "deep-stringifies delete responses (a Status object — immediate deletion)" do
       out = K8sRails.client.delete("g", "v", "n", "workflows", "wf-1")
       expect(out).to eq("kind" => "Status", "status" => "Success")
+    end
+
+    it "deep-stringifies delete responses (the object itself — graceful deletion, #35)" do
+      K8sRails.config.api_client = ObjectResponseDeleteTransport.new
+
+      out = K8sRails.client.delete("", "v1", "default", "pods", "pod-1")
+      expect(out).to eq(
+        "kind" => "Pod",
+        "metadata" => { "name" => "pod-1", "deletionTimestamp" => "2026-11-07T00:00:00Z" },
+        "spec" => { "containers" => [{ "name" => "c" }] }
+      )
     end
 
     # Cluster-scoped endpoints (#17): same normalization contract, no namespace
@@ -762,5 +773,24 @@ class RaisingTransport
 
   def call_api(*)
     raise @error
+  end
+end
+
+# A transport whose DELETE returns the deleted object itself (graceful
+# deletion), to prove the #35 pass-through contract: the delete response is
+# normalized as-is, whether the API answers with a Status object or the
+# object body (Pods under their default grace period answer the object;
+# immediately-deleted resources answer a Status).
+class ObjectResponseDeleteTransport
+  def call_api(_method, _path, _opts = {})
+    [
+      {
+        kind: "Pod",
+        metadata: { name: "pod-1", deletionTimestamp: "2026-11-07T00:00:00Z" },
+        spec: { containers: [{ name: "c" }] }
+      },
+      200,
+      {}
+    ]
   end
 end

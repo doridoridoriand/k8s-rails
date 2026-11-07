@@ -4,6 +4,15 @@ All notable changes to `k8s-rails` are documented in this file.
 
 ## Unreleased
 
+- **Docs: corrected the `delete` return-value contract** (#35). The 0.3.0
+  notes (and the README / design doc / `Resource` comments) described the
+  delete response as a Status object in general. The value is the API's
+  delete response, string-keyed as-is: a Status object for immediately-deleted
+  resources (measured: ConfigMap on Kubernetes 1.36.1), the deleted object
+  itself with `metadata.deletionTimestamp` set for graceful deletion
+  (measured: Pod). Deletion acceptance and the object actually being gone are
+  different things — confirm disappearance with `find_or_nil`. Both response
+  shapes are now covered as pass-through by specs. No code change.
 - **Testing: boundary-condition regression layer + kind E2E** (#34):
   - New `spec/real_transport_spec.rb` drives the REAL kruby `ApiClient`
     (typhoeus / libcurl pipeline) against loopback HTTP servers
@@ -151,8 +160,10 @@ All notable changes to `k8s-rails` are documented in this file.
   Existing named built-in and CRD declarations behave exactly as before.
 - **Added `delete` / `delete_cluster`** (completing CRUD). The readonly gate is
   the same shape as create / patch (calling with a `readonly: true` declaration
-  raises `ReadOnlyError`). K8s returns a Status object
-  (`{"kind":"Status","status":"Success"}`) on successful delete.
+  raises `ReadOnlyError`). The return value is the API's delete response,
+  string-keyed as-is: a Status object (`{"kind":"Status","status":"Success"}`)
+  for immediately-deleted resources, the object itself (with
+  `metadata.deletionTimestamp`) for graceful deletion (e.g. Pods).
 - **Test injection stub contract change (affects test code)**: the method
   `config.api_client` must implement is now the single
   `call_api(http_method, path, opts)` (returning `[data, status_code, headers]`,

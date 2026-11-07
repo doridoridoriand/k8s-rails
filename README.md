@@ -100,7 +100,7 @@ Pod.create({
   spec:       { containers: [{ name: "busybox", image: "busybox" }] }
 })
 Pod.patch("busybox", [{ op: "replace", path: "/spec/containers/0/image", value: "busybox:1.36" }])
-Pod.delete("busybox")        # => {"kind" => "Status", "status" => "Success", ...}
+Pod.delete("busybox")        # => the API's delete response, string-keyed (see "What delete returns" below)
 
 # Deployment (named group) is used exactly the same way
 Deployment.list              # all Deployments in the default namespace
@@ -109,6 +109,25 @@ Deployment.delete("web")     # readonly: false only
 
 K8sRails.connected?          # true on success; raises K8sRails::Unavailable / ApiError on failure
 ```
+
+#### What delete returns
+
+`delete` / `delete_cluster` return the API's delete response as-is,
+deep-stringified — the gem never rewrites it into a fixed shape. Which shape
+you get depends on the resource and its deletion path:
+
+- **A Status object** for immediately-deleted resources. A ConfigMap on
+  Kubernetes 1.36 answers
+  `{"kind" => "Status", "apiVersion" => "v1", "metadata" => {},
+  "status" => "Success", "details" => {"name" => "...", "kind" => "configmaps", ...}}`.
+- **The object itself** for graceful deletion — a Pod under its default grace
+  period answers the Pod body with `metadata.deletionTimestamp` set (the Pod
+  API contract defines the DELETE response as the Pod object, 200/202).
+
+Deletion **acceptance** is not the same as the object being **gone**:
+finalizers or a grace period keep the object around after a successful call.
+To confirm the object no longer exists, poll with `find_or_nil` (returns
+`nil` once it is gone).
 
 ### Example: Argo Workflows (CRD)
 
