@@ -20,7 +20,13 @@ concurrency:
 
 jobs:
   rspec-rubocop:
-    runs-on: ubuntu-latest
+    # ubuntu-latest moved to ubuntu-26.04 (2026-11), which builds only the
+    # latest patch of each Ruby series. The matrix below pins exact patch
+    # versions ON PURPOSE (3.3.0 = the declared floor, kruby's
+    # required_ruby_version; design §13: declared range = tested range), so
+    # the runner image is pinned to the image where those builds exist.
+    # Revisit when the matrix itself drops the floor pins.
+    runs-on: ubuntu-24.04
     strategy:
       fail-fast: false
       matrix:
@@ -73,7 +79,8 @@ jobs:
     # helm/kind-action は kind と kubectl をインストールする（公式ドキュメント
     # の推奨導線）。kubeconfig は明示パスに書き出し、`rake e2e` 実行時の
     # KUBECONFIG で同じファイルを kubectl（ガード）と kruby（接続解決）が共有する。
-    runs-on: ubuntu-latest
+    # 同じ理由で runner image を固定（3.3.8 は ubuntu-26.04 のビルド対象外）。
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
       - name: Set up Ruby
