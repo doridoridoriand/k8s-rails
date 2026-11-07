@@ -411,6 +411,46 @@ may use symbol keys — the gem stringifies them.
 With a transport injected, `K8sRails.connected?` returns `true` without
 network I/O (see [Connectivity check](#connectivity-check)).
 
+### Verification layers
+
+The suite is layered by how much of the real stack it touches (#34):
+
+1. **Unit layer** — stub transports (`bundle exec rake`, no cluster).
+   Client bridging / error conversion / path building, resource gating,
+   CRD method generation.
+2. **Real-transport loopback layer** — the real kruby `ApiClient`
+   (typhoeus / libcurl pipeline) driven against loopback HTTP servers,
+   still no cluster. Pins what actually goes on the wire: URL paths
+   (core vs named group, namespaced vs cluster, CGI escaping), HTTP
+   methods, `Content-Type` negotiation, the `Authorization` header,
+   deep string-keyed deserialization, the K3 error conversion for real
+   404 / 401 / 403 / 500 responses, kubeconfig-file resolution
+   (`KUBECONFIG`), finite timeouts, and transport failures
+   (connection refused / connection dropped mid-request) surfacing as
+   `K8sRails::Unavailable`. Also part of `bundle exec rake`.
+3. **kind E2E layer** — the real cluster path against an isolated kind
+   cluster (`bundle exec rake e2e`, see `scripts/e2e_kind.rb`):
+   `connected?`, cluster-scoped reads, namespaced CRUD with both delete
+   response shapes (immediate -> Status, graceful -> the object itself),
+   and cleanup assertions. The script refuses to run unless the target
+   kubectl context (the current one, or `E2E_KIND_CONTEXT`) starts with
+   `kind-`; it then exports a private kubeconfig snapshot containing only
+   that context and pins `KUBECONFIG` to the snapshot, so a personal
+   kubeconfig is never targeted and a concurrently-modified kubeconfig can
+   not switch the target mid-run. Every test object is deleted at exit, and
+   a cleanup error fails the run. Run:
+
+   ```
+   kind create cluster --name k8s-rails-e2e
+   bundle exec rake e2e
+   kind delete cluster --name k8s-rails-e2e
+   ```
+
+CI mirrors the layers: the `rspec-rubocop` matrix job runs layers 1-2 for
+every declared Ruby on every push / PR (no cluster), and the separate
+`e2e-kind` job runs layer 3 on one Ruby (3.3.8, the development version)
+against its own kind cluster.
+
 ## Development
 
 ```
@@ -450,7 +490,6 @@ from a cluster connection that relies on kruby's own configuration behavior
   exclusion, extend the declared range to `< 4.2`, and add 4.1 to the
   matrix after verification (the preview is excluded until the upstream
   Bundler `Pathname::SEPARATOR_PAT` bug is fixed)
-- CI-based E2E tests using kind
 - watch (streaming) support, under consideration
 
 ## License
