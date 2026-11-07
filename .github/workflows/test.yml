@@ -17,7 +17,13 @@ concurrency:
 
 jobs:
   rspec-rubocop:
-    runs-on: ubuntu-latest
+    # ubuntu-latest moved to ubuntu-26.04 (2026-11), which builds only the
+    # latest patch of each Ruby series. The matrix below pins exact patch
+    # versions ON PURPOSE (3.3.0 = the declared floor, kruby's
+    # required_ruby_version; design §13: declared range = tested range), so
+    # the runner image is pinned to the image where those builds exist.
+    # Revisit when the matrix itself drops the floor pins.
+    runs-on: ubuntu-24.04
     strategy:
       fail-fast: false
       matrix:
