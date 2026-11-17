@@ -437,8 +437,11 @@ The suite is layered by how much of the real stack it touches (#34):
    `kind-`; it then exports a private kubeconfig snapshot containing only
    that context and pins `KUBECONFIG` to the snapshot, so a personal
    kubeconfig is never targeted and a concurrently-modified kubeconfig can
-   not switch the target mid-run. Every test object is deleted at exit, and
-   a cleanup error fails the run. Run:
+   not switch the target mid-run. Every test object is deleted at exit —
+   cleanup polls until the object is actually gone (bounded) — and a cleanup
+   error or a lingering object fails the run. Object names carry a per-run
+   random suffix, so concurrent runs against the same cluster never collide.
+   Run:
 
    ```
    kind create cluster --name k8s-rails-e2e

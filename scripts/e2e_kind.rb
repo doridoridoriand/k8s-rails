@@ -10,7 +10,8 @@
 #     back, then immediate deletion -> Status response) and a Pod (scheduled
 #     first, then graceful deletion -> the object itself with
 #     `metadata.deletionTimestamp` and a positive grace period)
-#   - cleanup assertions: both probe objects must be gone at exit, and any
+#   - cleanup assertions: both probe objects must be GONE at exit (cleanup
+#     polls for actual disappearance within a bounded deadline) and any
 #     cleanup error fails the run
 #
 # SAFETY GUARD: the script refuses to run unless the target kubectl context
@@ -75,8 +76,12 @@ end
 at_exit { File.delete(kubeconfig_snapshot) if File.exist?(kubeconfig_snapshot) }
 
 require "k8s-rails"
+require "securerandom"
 
-prefix = "k8s-rails-e2e-#{Time.now.to_i}"
+# The random suffix keeps two runs against the same cluster in the same second
+# from colliding on object names (a lost create would otherwise let the other
+# run patch or delete this run's objects, including during cleanup).
+prefix = "k8s-rails-e2e-#{Time.now.to_i}-#{SecureRandom.hex(4)}"
 cm_name = "#{prefix}-cm"
 pod_name = "#{prefix}-pod"
 
@@ -203,16 +208,33 @@ begin
 ensure
   # Best-effort cleanup even on failure: NotFound means already gone. Each
   # resource is cleaned up independently so one cleanup error cannot skip the
-  # others, and any cleanup error fails the run (leaves a residue on the
-  # cluster, which must be visible).
+  # others. DELETE acceptance is not enough (a terminating Pod can still be
+  # present), so each resource is polled until it is actually GONE within a
+  # bounded deadline; any cleanup error or expiry fails the run (residue on
+  # the cluster must be visible).
   cleanup_errors = []
   [[configmap, cm_name, "ConfigMap"], [pod, pod_name, "Pod"]].each do |resource, name, label|
-    resource.delete(name, namespace: "default")
-  rescue K8sRails::NotFound
-    nil
+    begin
+      resource.delete(name, namespace: "default")
+    rescue K8sRails::NotFound
+      nil
+    rescue StandardError => e
+      cleanup_errors << "#{label}/#{name} delete: #{e.class}: #{e.message}"
+      puts "CLEANUP FAIL #{label}/#{name} delete: #{e.class}: #{e.message}"
+      next
+    end
+    deadline = Time.now + 90
+    while gone(resource, name)
+      if Time.now > deadline
+        cleanup_errors << "#{label}/#{name}: still present after the cleanup wait"
+        puts "CLEANUP FAIL #{label}/#{name}: still present after the cleanup wait"
+        break
+      end
+      sleep 2
+    end
   rescue StandardError => e
-    cleanup_errors << "#{label}/#{name}: #{e.class}: #{e.message}"
-    puts "CLEANUP FAIL #{label}/#{name}: #{e.class}: #{e.message}"
+    cleanup_errors << "#{label}/#{name} verify: #{e.class}: #{e.message}"
+    puts "CLEANUP FAIL #{label}/#{name} verify: #{e.class}: #{e.message}"
   end
   unless cleanup_errors.empty?
     puts "E2E CLEANUP FAILED: #{cleanup_errors.join('; ')}"
